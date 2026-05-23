@@ -122,7 +122,7 @@
 
     let uiAmmo, uiReserve, uiHP, reloadMsg, menuOverlay, mainMenu, gameOverMenu, killFeed;
 
-    // ВыносимstartGame на самый верх видимости скрипта
+    // Выносим startGame на самый верх видимости скрипта
     function startGame() {
         if (!controls) return;
 
@@ -208,7 +208,8 @@
                 case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
                 case 'ArrowDown': case 'KeyS': moveBackward = true; break;
                 case 'ArrowRight': case 'KeyD': moveRight = true; break;
-                case 'Space': if (canJump === true) velocity.y += 150; canJump = false; break;
+                // ФИКС: Уменьшен импульс прыжка со 150 до 45 для реалистичной высоты
+                case 'Space': if (canJump === true) velocity.y += 45; canJump = false; break;
                 case 'KeyR': reloadWeapon(); break;
             }
         };
@@ -548,8 +549,9 @@
                 bot.userData.rightArm.rotation.x = 0.2;
             }
 
-            if(dist < 35 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 700 : 1400)) {
-                if(dist < 25 && Math.random() > (0.2 + accuracySpread)) {
+            // ФИКС: Добавлено ограничение по максимальной дистанции атаки (dist < 25)
+            if(dist < 25 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 700 : 1400)) {
+                if(Math.random() > (0.2 + accuracySpread)) {
                     playerHealth -= (botDifficulty === 'hard' ? 20 : 10);
                     updateHUD();
                     
