@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Advanced Graphics</title>
+    <title>Browser CS Prototype - Fixed</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; }
@@ -93,7 +93,6 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
 
 <script>
-    // --- Game Configuration & State ---
     let camera, scene, renderer, controls;
     let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
     let canJump = false;
@@ -101,7 +100,6 @@
     const velocity = new THREE.Vector3();
     const direction = new THREE.Vector3();
     
-    // Game State
     let isGameActive = false;
     let playerHealth = 100;
     let currentAmmo = 30;
@@ -111,20 +109,15 @@
     let bots = [];
     let obstacles = [];
     
-    // VFX & Weapon Animation Options
     let gunMesh, muzzleFlash;
     let bobTime = 0;
-
-    // Settings
     let botDifficulty = 'medium';
     let mapType = 'dust2_style';
     let weaponSkin = 'default';
 
-    // Constants
     const PLAYER_HEIGHT = 1.8;
     const PLAYER_SPEED = 80.0;
 
-    // DOM Elements
     let uiAmmo, uiReserve, uiHP, reloadMsg, menuOverlay, mainMenu, gameOverMenu, killFeed;
 
     function init() {
@@ -138,9 +131,7 @@
         killFeed = document.getElementById('kill-feed');
 
         scene = new THREE.Scene();
-
         camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        
         controls = new THREE.PointerLockControls(camera, document.body);
         
         controls.addEventListener('lock', () => {
@@ -191,7 +182,6 @@
         document.body.appendChild(renderer.domElement);
 
         window.addEventListener('resize', onWindowResize);
-        
         animate();
     }
 
@@ -218,7 +208,6 @@
             scene.remove(scene.children[0]); 
         }
 
-        // Улучшенное освещение для красивых теней
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
         scene.add(ambientLight);
 
@@ -227,13 +216,6 @@
         dirLight.castShadow = true;
         dirLight.shadow.mapSize.width = 2048;
         dirLight.shadow.mapSize.height = 2048;
-        dirLight.shadow.camera.near = 0.5;
-        dirLight.shadow.camera.far = 250;
-        const d = 100;
-        dirLight.shadow.camera.left = -d;
-        dirLight.shadow.camera.right = d;
-        dirLight.shadow.camera.top = d;
-        dirLight.shadow.camera.bottom = -d;
         scene.add(dirLight);
 
         scene.add(controls.getObject());
@@ -243,7 +225,6 @@
         createWeaponModel();
     }
 
-    // Генерация процедурной текстуры сетки для земли (чтобы графика была четче)
     function createGridTexture(color1, color2) {
         const canvas = document.createElement('canvas');
         canvas.width = 256;
@@ -276,7 +257,6 @@
         scene.background = new THREE.Color(fogColor);
         scene.fog = new THREE.FogExp2(fogColor, 0.015);
 
-        // Земля с красивой сеткой
         const floorGeo = new THREE.PlaneGeometry(300, 300);
         const floorMat = new THREE.MeshStandardMaterial({ 
             map: createGridTexture(floorColor1, floorColor2),
@@ -287,7 +267,6 @@
         floor.receiveShadow = true;
         scene.add(floor);
 
-        // Препятствия (коробки и стены)
         const boxGeo = new THREE.BoxGeometry(1, 1, 1);
         const boxMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.5 });
 
@@ -337,14 +316,12 @@
         barrel.position.set(0, 0.03, -0.35);
         gunMesh.add(barrel);
 
-        // Вспышка при выстреле
         const flashGeo = new THREE.SphereGeometry(0.06, 8, 8);
         const flashMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0 });
         muzzleFlash = new THREE.Mesh(flashGeo, flashMat);
         muzzleFlash.position.set(0, 0.03, -0.55);
         gunMesh.add(muzzleFlash);
 
-        // Позиционируем оружие на экране справа внизу
         gunMesh.position.set(0.25, -0.25, -0.5);
         camera.add(gunMesh);
     }
@@ -353,48 +330,40 @@
         const count = 6;
         
         for(let i=0; i<count; i++) {
-            // Создаем составного человекоподобного бота из группы мешей
             const botGroup = new THREE.Group();
 
-            // Материалы для одежды (Террористы / Спецназ визуально)
             const clothesMat = new THREE.MeshStandardMaterial({ color: mapType === 'dust2_style' ? 0x994d00 : 0x2244aa, roughness: 0.7 });
             const pantsMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
             const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdbac });
 
-            // Торс
             const torsoGeo = new THREE.BoxGeometry(0.7, 0.9, 0.4);
             const torso = new THREE.Mesh(torsoGeo, clothesMat);
             torso.position.y = 1.15;
             torso.castShadow = true;
             botGroup.add(torso);
 
-            // Голова
             const headGeo = new THREE.BoxGeometry(0.35, 0.35, 0.35);
             const head = new THREE.Mesh(headGeo, skinMat);
             head.position.y = 1.75;
             head.castShadow = true;
             botGroup.add(head);
 
-            // Очки / Маска для грозного вида
             const visorGeo = new THREE.BoxGeometry(0.38, 0.1, 0.36);
             const visorMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
             const visor = new THREE.Mesh(visorGeo, visorMat);
             visor.position.set(0, 1.78, 0.02);
             botGroup.add(visor);
 
-            // Левая нога
             const legGeo = new THREE.BoxGeometry(0.25, 0.7, 0.25);
             const leftLeg = new THREE.Mesh(legGeo, pantsMat);
             leftLeg.position.set(-0.2, 0.35, 0);
             leftLeg.castShadow = true;
             botGroup.add(leftLeg);
 
-            // Правая нога
             const rightLeg = leftLeg.clone();
             rightLeg.position.x = 0.2;
             botGroup.add(rightLeg);
 
-            // Руки
             const armGeo = new THREE.BoxGeometry(0.2, 0.7, 0.2);
             const leftArm = new THREE.Mesh(armGeo, clothesMat);
             leftArm.position.set(-0.45, 1.15, 0);
@@ -405,7 +374,6 @@
             rightArm.position.x = 0.45;
             botGroup.add(rightArm);
             
-            // Направление спавна
             const angle = Math.random() * Math.PI * 2;
             const radius = 20 + Math.random() * 40;
             botGroup.position.set(Math.cos(angle)*radius, 0, Math.sin(angle)*radius);
@@ -439,29 +407,25 @@
         currentAmmo--;
         updateHUD();
 
-        // Отдача оружия вверх
         if(gunMesh) {
             gunMesh.position.z += 0.05;
             gunMesh.rotation.x += 0.05;
         }
         camera.rotation.x += 0.015;
 
-        // Вспышка выстрела
         if(muzzleFlash) {
             muzzleFlash.material.opacity = 1;
-            setTimeout(() => { if(muzzleFlash) muzzleFlash.material.opacity = 0; }, 400);
+            setTimeout(() => { if(muzzleFlash) muzzleFlash.material.opacity = 0; }, 60);
         }
 
         const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
 
-        // Ищем попадание в группы ботов (проверяем все подобъекты)
         const intersects = raycaster.intersectObjects(scene.children, true);
         createBulletTrail(raycaster);
 
         for (let i = 0; i < intersects.length; i++) {
             let hitObj = intersects[i].object;
-            // Ищем родительскую группу бота
             while (hitObj.parent && !bots.includes(hitObj)) {
                 hitObj = hitObj.parent;
             }
@@ -469,14 +433,13 @@
             if (bots.includes(hitObj)) {
                 hitObj.userData.health -= 35;
                 
-                // Эффект отлетания назад при попадании
                 const hitDir = raycaster.ray.direction.clone().setY(0).normalize();
                 hitObj.position.add(hitDir.multiplyScalar(0.4));
                 
                 if(hitObj.userData.health <= 0) {
                     killBot(hitObj);
                 }
-                break; // Пуля попала в одного, выходим
+                break;
             }
         }
         
@@ -552,7 +515,6 @@
             const speed = botDifficulty === 'easy' ? 12 : (botDifficulty === 'hard' ? 35 : 20);
             const accuracySpread = botDifficulty === 'easy' ? 0.4 : (botDifficulty === 'hard' ? 0.04 : 0.18);
 
-            // Поворот бота лицом к игроку
             bot.lookAt(playerPos.x, bot.position.y, playerPos.z);
 
             if(dist > 12) {
@@ -560,7 +522,6 @@
                 dir.y = 0;
                 bot.position.add(dir.multiplyScalar(speed * delta));
 
-                // Анимация бега (машем ногами и руками)
                 const animSpeed = time * 0.01 + bot.userData.animOffset;
                 const wave = Math.sin(animSpeed);
                 bot.userData.leftLeg.rotation.x = wave * 0.6;
@@ -568,20 +529,18 @@
                 bot.userData.leftArm.rotation.x = -wave * 0.4;
                 bot.userData.rightArm.rotation.x = wave * 0.4;
             } else {
-                // Стоит на месте и целится — ноги ровно
                 bot.userData.leftLeg.rotation.x = 0;
                 bot.userData.rightLeg.rotation.x = 0;
                 bot.userData.leftArm.rotation.x = 0.2;
                 bot.userData.rightArm.rotation.x = 0.2;
             }
 
-            // Стрельба ботов
             if(dist < 35 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 700 : 1400)) {
-                if(dist < 25 && Math.random() > (botDifficulty === 'easy' ? 0.65 : 0.25)) {
+                // Рассчитываем шанс попадания на основе разброса (accuracySpread)
+                if(dist < 25 && Math.random() > (0.2 + accuracySpread)) {
                     playerHealth -= (botDifficulty === 'hard' ? 20 : 10);
                     updateHUD();
                     
-                    // Эффект покраснения интерфейса при получении урона
                     document.body.style.backgroundColor = '#330000';
                     setTimeout(() => document.body.style.backgroundColor = '#000', 80);
 
@@ -607,4 +566,86 @@
         if (controls) controls.unlock();
         if (gameOverMenu) gameOverMenu.style.display = 'block';
         if (mainMenu) mainMenu.style.display = 'none';
-        if (menuOverlay)
+        if (menuOverlay) menuOverlay.style.display = 'flex';
+        
+        const titleEl = document.getElementById('end-title');
+        const reasonEl = document.getElementById('end-reason');
+        if (titleEl) {
+            titleEl.innerText = win ? "ПОБЕДА!" : "ВАС УБИЛИ";
+            titleEl.style.color = win ? "#00ff00" : "#ff0000";
+        }
+        if (reasonEl) {
+            reasonEl.innerText = win ? "Все вражеские боты устранены." : "Попробуйте изменить тактику или снизить сложность.";
+        }
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const time = performance.now();
+        const delta = (time - prevTime) / 1000;
+
+        if (controls && controls.isLocked === true && isGameActive) {
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            velocity.y -= 9.8 * 20.0 * delta;
+
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.normalize();
+
+            const isMoving = moveForward || moveBackward || moveLeft || moveRight;
+
+            if (moveForward || moveBackward) velocity.z -= direction.z * PLAYER_SPEED * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * PLAYER_SPEED * delta;
+
+            controls.moveRight(-velocity.x * delta);
+            controls.moveForward(-velocity.z * delta);
+            controls.getObject().position.y += (velocity.y * delta);
+
+            if (controls.getObject().position.y < PLAYER_HEIGHT) {
+                velocity.y = 0;
+                controls.getObject().position.y = PLAYER_HEIGHT;
+                canJump = true;
+            }
+            
+            const pos = controls.getObject().position;
+            if(pos.x > 145) pos.x = 145;
+            if(pos.x < -145) pos.x = -145;
+            if(pos.z > 145) pos.z = 145;
+            if(pos.z < -145) pos.z = -145;
+
+            if(gunMesh) {
+                gunMesh.position.z = THREE.MathUtils.lerp(gunMesh.position.z, -0.5, 0.1);
+                gunMesh.rotation.x = THREE.MathUtils.lerp(gunMesh.rotation.x, 0, 0.1);
+
+                if (isMoving && canJump) {
+                    bobTime += delta * 12;
+                    gunMesh.position.y = -0.25 + Math.sin(bobTime) * 0.015;
+                    gunMesh.position.x = 0.25 + Math.cos(bobTime * 0.5) * 0.01;
+                } else {
+                    gunMesh.position.y = THREE.MathUtils.lerp(gunMesh.position.y, -0.25, 0.1);
+                    gunMesh.position.x = THREE.MathUtils.lerp(gunMesh.position.x, 0.25, 0.1);
+                }
+            }
+
+            botLogic(delta);
+            camera.rotation.x *= 0.85;
+        }
+
+        prevTime = time;
+        if (renderer && scene && camera) {
+            renderer.render(scene, camera);
+        }
+    }
+
+    window.onload = init;
+</script>
+</body>
+</html>
