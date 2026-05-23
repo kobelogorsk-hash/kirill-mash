@@ -101,6 +101,7 @@
     
     // Game State
     let isGameActive = false;
+    let isStartingGame = false; // Флаг предотвращения показа меню во время старта
     let playerHealth = 100;
     let currentAmmo = 30;
     let reserveAmmo = 90;
@@ -155,7 +156,7 @@
         });
         
         controls.addEventListener('unlock', () => {
-            if(playerHealth > 0) {
+            if(playerHealth > 0 && !isStartingGame) {
                 isGameActive = false;
                 mainMenu.style.display = 'block';
                 gameOverMenu.style.display = 'none';
@@ -209,6 +210,9 @@
         weaponSkin = document.getElementById('skin-select').value;
         botDifficulty = document.getElementById('difficulty-select').value;
 
+        // Устанавливаем флаг, что игра запускается (чтобы меню не появлялось)
+        isStartingGame = true;
+
         // Reset State
         playerHealth = 100;
         currentAmmo = maxAmmo;
@@ -240,6 +244,11 @@
         
         // Request pointer lock
         controls.lock();
+        
+        // Сбрасываем флаг после захвата курсора (с небольшой задержкой для надежности)
+        setTimeout(() => {
+            isStartingGame = false;
+        }, 500);
     }
 
     function buildMap() {
