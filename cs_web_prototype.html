@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Browser CS Prototype</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); pointer-events: none; }
+        .ch-line { position: absolute; background: #0f0; }
+        .ch-h { width: 100%; height: 2px; top: 9px; }
+        .ch-v { height: 100%; width: 2px; left: 9px; }
+        
+        #hud-bottom { padding: 20px; display: flex; justify-content: space-between; color: white; text-shadow: 1px 1px 2px black; font-size: 24px; font-weight: bold; }
+        #ammo-box { background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 5px; }
+        #health-box { background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 5px; color: #ff4444; }
+        
+        #menu-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: auto; z-index: 10; }
+        h1 { color: #ff9900; font-size: 48px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 2px; }
+        .panel { background: #222; padding: 30px; border-radius: 10px; border: 1px solid #444; text-align: center; color: white; max-width: 500px; }
+        .control-group { margin: 20px 0; text-align: left; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #aaa; }
+        select, button { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 5px; border: none; font-size: 16px; cursor: pointer; }
+        select { background: #333; color: white; border: 1px solid #555; }
+        button.start-btn { background: #ff9900; color: black; font-weight: bold; transition: 0.2s; }
+        button.start-btn:hover { background: #ffb733; transform: scale(1.02); }
+        
+        #reload-msg { position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%); color: #ff4444; font-size: 20px; font-weight: bold; display: none; text-shadow: 1px 1px 2px black; }
+        #kill-feed { position: absolute; top: 20px; right: 20px; text-align: right; color: white; text-shadow: 1px 1px 2px black; font-size: 14px; }
+        .feed-item { margin-bottom: 5px; opacity: 1; transition: opacity 2s; }
+    </style>
+</head>
+<body>
+
+<!-- UI Elements -->
+<div id="ui-layer">
+    <div id="kill-feed"></div>
+    <div id="crosshair">
+        <div class="ch-line ch-h"></div>
+        <div class="ch-line ch-v"></div>
+    </div>
+    <div id="reload-msg">НАЖМИТЕ 'R' ДЛЯ ПЕРЕЗАРЯДКИ</div>
+    <div id="hud-bottom">
+        <div id="health-box">HP: <span id="hp-val">100</span></div>
+        <div id="ammo-box"><span id="ammo-val">30</span> / <span id="reserve-val">90</span></div>
+    </div>
+</div>
+
+<!-- Main Menu -->
+<div id="menu-overlay">
+    <div class="panel" id="main-menu">
+        <h1>CS: WEB PROTOTYPE</h1>
+        <div class="control-group">
+            <label>Карта</label>
+            <select id="map-select">
+                <option value="dust2_style">Dust II Style (Пустыня)</option>
+                <option value="ice_style">Ice Map (Лед)</option>
+                <option value="city_style">City Block (Город)</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>Скин оружия</label>
+            <select id="skin-select">
+                <option value="default">Стандарт (Черный)</option>
+                <option value="gold">Золотой Дракон</option>
+                <option value="neon">Неон Киберпанк</option>
+                <option value="camo">Лесной Камуфляж</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>Сложность ботов</label>
+            <select id="difficulty-select">
+                <option value="easy">Легкая (Медленные, неточные)</option>
+                <option value="medium" selected>Средняя (Нормальные)</option>
+                <option value="hard">Сложная (Быстрые, снайперы)</option>
+            </select>
+        </div>
+        <button class="start-btn" onclick="startGame()">В БОЙ</button>
+        <p style="font-size: 12px; color: #777; margin-top: 15px;">WASD - Ходьба | ЛКМ - Огонь | R - Перезарядка | ESC - Меню</p>
+    </div>
+    <div class="panel" id="game-over-menu" style="display: none;">
+        <h1 id="end-title">ИГРА ОКОНЧЕНА</h1>
+        <p id="end-reason"></p>
+        <button class="start-btn" onclick="location.reload()">В МЕНЮ</button>
+    </div>
+</div>
+
+<!-- Three.js Library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- PointerLockControls -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+
+<script>
+    // --- Game Configuration & State ---
+    let camera, scene, renderer, controls;
+    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+    let canJump = false;
+    let prevTime = performance.now();
+    const velocity = new THREE.Vector3();
+    const direction = new THREE.Vector3();
+    
+    // Game State
+    let isGameActive = false;
+    let playerHealth = 100;
+    let currentAmmo = 30;
+    let reserveAmmo = 90;
+    let maxAmmo = 30;
+    let isReloading = false;
+    let bots = [];
+    let bullets = [];
+    let obstacles = []; // For collision
+    
+    // Settings
+    let botDifficulty = 'medium';
+    let mapType = 'dust2_style';
+    let weaponSkin = 'default';
+
+    // Constants
+    const PLAYER_HEIGHT = 1.8;
+    const PLAYER_SPEED = 80.0;
+    const BOT_SPEED_BASE = 30.0;
+
+    // DOM Elements
+    const uiAmmo = document.getElementById('ammo-val');
+    const uiReserve = document.getElementById('reserve-val');
+    const uiHP = document.getElementById('hp-val');
+    const reloadMsg = document.getElementById('reload-msg');
+    const menuOverlay = document.getElementById('menu-overlay');
+    const mainMenu = document.getElementById('main-menu');
+    const gameOverMenu = document.getElementById('game-over-menu');
+    const killFeed = document.getElementById('kill-feed');
+
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky blue
+        scene.fog = new THREE.Fog(0x87CEEB, 0, 70);
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        // Lights
+        const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
+        light.position.set(0.5, 1, 0.75);
+        scene.add(light);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // Controls
+        controls = new THREE.PointerLockControls(camera, document.body);
+        
+        controls.addEventListener('lock', () => {
+            isGameActive = true;
+            menuOverlay.style.display = 'none';
+        });
+        
+        controls.addEventListener('unlock', () => {
+            if(playerHealth > 0) {
+                isGameActive = false;
+                mainMenu.style.display = 'block';
+                gameOverMenu.style.display = 'none';
+                menuOverlay.style.display = 'flex';
+            }
+        });
+
+        scene.add(controls.getObject());
+
+        // Input Listeners
+        const onKeyDown = function (event) {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = true; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = true; break;
+                case 'ArrowRight': case 'KeyD': moveRight = true; break;
+                case 'Space': if (canJump === true) velocity.y += 150; canJump = false; break;
+                case 'KeyR': reloadWeapon(); break;
+            }
+        };
+
+        const onKeyUp = function (event) {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = false; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = false; break;
+                case 'ArrowRight': case 'KeyD': moveRight = false; break;
+            }
+        };
+
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
+        document.addEventListener('mousedown', () => { if(isGameActive && !isReloading) shoot(); });
+
+        // Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        window.addEventListener('resize', onWindowResize);
+        
+        // Initial Setup (Wait for start)
+        animate();
+    }
+
+    function startGame() {
+        // Get Settings
+        mapType = document.getElementById('map-select').value;
+        weaponSkin = document.getElementById('skin-select').value;
+        botDifficulty = document.getElementById('difficulty-select').value;
+
+        // Reset State
+        playerHealth = 100;
+        currentAmmo = maxAmmo;
+        reserveAmmo = 90;
+        isReloading = false;
+        bots = [];
+        updateHUD();
+        
+        // Clear Scene Objects (except lights/camera)
+        while(scene.children.length > 0){ 
+            scene.remove(scene.children[0]); 
+        }
+        // Re-add lights
+        const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
+        scene.add(light);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        scene.add(dirLight);
+        scene.add(controls.getObject());
+
+        buildMap();
+        spawnBots();
+        createWeaponModel();
+        
+        // Force hide menu immediately
+        mainMenu.style.display = 'none';
+        gameOverMenu.style.display = 'none';
+        menuOverlay.style.display = 'none';
+        
+        // Request pointer lock
+        controls.lock();
+    }
+
+    function buildMap() {
+        // Floor
+        let floorColor, fogColor;
+        if(mapType === 'dust2_style') { floorColor = 0xE6C288; fogColor = 0xE6C288; }
+        else if(mapType === 'ice_style') { floorColor = 0xAADDFF; fogColor = 0xAADDFF; }
+        else { floorColor = 0x333333; fogColor = 0x333333; }
+
+        scene.background = new THREE.Color(fogColor);
+        scene.fog = new THREE.Fog(fogColor, 0, 60);
+
+        const floorGeo = new THREE.PlaneGeometry(200, 200);
+        const floorMat = new THREE.MeshStandardMaterial({ color: floorColor, roughness: 0.8 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Walls / Obstacles generation based on map
+        const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+        let boxMat;
+        
+        if(mapType === 'dust2_style') boxMat = new THREE.MeshStandardMaterial({ color: 0xC2A876 });
+        else if(mapType === 'ice_style') boxMat = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.8 });
+        else boxMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+
+        // Simple procedural layout
+        const positions = [
+            {x: 10, z: 10, w: 5, h: 4, d: 5}, {x: -15, z: 20, w: 10, h: 3, d: 2},
+            {x: 20, z: -10, w: 2, h: 5, d: 10}, {x: -20, z: -20, w: 8, h: 4, d: 8},
+            {x: 0, z: 30, w: 20, h: 6, d: 2}, {x: 0, z: -30, w: 2, h: 6, d: 20}
+        ];
+
+        positions.forEach(pos => {
+            const mesh = new THREE.Mesh(boxGeo, boxMat);
+            mesh.position.set(pos.x, pos.h/2, pos.z);
+            mesh.scale.set(pos.w, pos.h, pos.d);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            obstacles.push(new THREE.Box3().setFromObject(mesh));
+        });
+        
+        // Reset Player Position
+        controls.getObject().position.set(0, PLAYER_HEIGHT, 0);
+        velocity.set(0,0,0);
+    }
+
+    function createWeaponModel() {
+        // Simple gun model attached to camera
+        const gunGroup = new THREE.Group();
+        
+        let color = 0x222222;
+        if(weaponSkin === 'gold') color = 0xFFD700;
+        if(weaponSkin === 'neon') color = 0xFF00FF;
+        if(weaponSkin === 'camo') color = 0x4B5320;
+
+        const bodyGeo = new THREE.BoxGeometry(0.1, 0.15, 0.6);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: color });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.position.set(0.2, -0.2, -0.4);
+        
+        const barrelGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.4);
+        const barrelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+        const barrel = new THREE.Mesh(barrelGeo, barrelMat);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(0.2, -0.15, -0.8);
+
+        gunGroup.add(body);
+        gunGroup.add(barrel);
+        camera.add(gunGroup);
+    }
+
+    function spawnBots() {
+        const count = 5;
+        const botGeo = new THREE.CapsuleGeometry(0.5, 1, 4, 8);
+        let botColor = 0xff0000; // Enemy red
+        
+        for(let i=0; i<count; i++) {
+            const mat = new THREE.MeshStandardMaterial({ color: botColor });
+            const bot = new THREE.Mesh(botGeo, mat);
+            
+            // Random position away from center
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 10 + Math.random() * 30;
+            bot.position.set(Math.cos(angle)*radius, 1, Math.sin(angle)*radius);
+            
+            bot.castShadow = true;
+            bot.userData = { 
+                health: 100, 
+                lastShot: 0, 
+                id: i,
+                state: 'idle' 
+            };
+            
+            scene.add(bot);
+            bots.push(bot);
+        }
+    }
+
+    function shoot() {
+        if(currentAmmo <= 0) {
+            reloadMsg.style.display = 'block';
+            setTimeout(() => reloadMsg.style.display = 'none', 1000);
+            return;
+        }
+
+        currentAmmo--;
+        updateHUD();
+
+        // Visual Recoil
+        camera.rotation.x += 0.02;
+
+        // Raycast
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+        // Check intersections with bots
+        const intersects = raycaster.intersectObjects(bots);
+        
+        // Create bullet trail visual
+        createBulletTrail(raycaster);
+
+        if(intersects.length > 0) {
+            const hitObj = intersects[0].object;
+            if(bots.includes(hitObj)) {
+                hitObj.userData.health -= 35; // Damage
+                // Knockback effect
+                hitObj.position.add(raycaster.ray.direction.multiplyScalar(0.5));
+                
+                if(hitObj.userData.health <= 0) {
+                    killBot(hitObj);
+                }
+            }
+        }
+        
+        if(currentAmmo === 0) reloadWeapon();
+    }
+
+    function createBulletTrail(raycaster) {
+        // Simple flash line
+        const material = new THREE.LineBasicMaterial({ color: 0xffff00 });
+        const points = [];
+        const start = new THREE.Vector3(0.2, -0.2, -0.5).applyMatrix4(camera.matrixWorld);
+        const end = raycaster.ray.at(50, new THREE.Vector3()); // Long distance
+        points.push(start, end);
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geometry, material);
+        scene.add(line);
+        setTimeout(() => scene.remove(line), 50);
+    }
+
+    function reloadWeapon() {
+        if(isReloading || currentAmmo === maxAmmo || reserveAmmo <= 0) return;
+        
+        isReloading = true;
+        reloadMsg.innerText = "ПЕРЕЗАРЯДКА...";
+        reloadMsg.style.display = 'block';
+        
+        // Animation simulation (rotate gun down)
+        const gun = camera.children[0];
+        if(gun) {
+            const originalRot = gun.rotation.x;
+            gun.rotation.x = -1; 
+        }
+
+        setTimeout(() => {
+            const needed = maxAmmo - currentAmmo;
+            const take = Math.min(needed, reserveAmmo);
+            currentAmmo += take;
+            reserveAmmo -= take;
+            
+            isReloading = false;
+            reloadMsg.style.display = 'none';
+            if(gun) gun.rotation.x = 0;
+            updateHUD();
+        }, 1500);
+    }
+
+    function killBot(bot) {
+        scene.remove(bot);
+        bots = bots.filter(b => b !== bot);
+        
+        const feedItem = document.createElement('div');
+        feedItem.className = 'feed-item';
+        feedItem.innerHTML = `Вы убили Бота`;
+        feedItem.style.color = '#0f0';
+        killFeed.prepend(feedItem);
+        setTimeout(() => feedItem.remove(), 3000);
+
+        if(bots.length === 0) {
+            endGame(true);
+        }
+    }
+
+    function botLogic(delta) {
+        const playerPos = controls.getObject().position;
+        const time = Date.now();
+
+        bots.forEach(bot => {
+            const dist = bot.position.distanceTo(playerPos);
+            const speed = botDifficulty === 'easy' ? 15 : (botDifficulty === 'hard' ? 45 : 25);
+            const reactionDelay = botDifficulty === 'easy' ? 1000 : (botDifficulty === 'hard' ? 200 : 500);
+            const accuracySpread = botDifficulty === 'easy' ? 0.5 : (botDifficulty === 'hard' ? 0.05 : 0.2);
+
+            // Move towards player if far, stop if close
+            if(dist > 10) {
+                const dir = new THREE.Vector3().subVectors(playerPos, bot.position).normalize();
+                dir.y = 0; // Keep on ground
+                bot.position.add(dir.multiplyScalar(speed * delta));
+                bot.lookAt(playerPos.x, 1, playerPos.z);
+            } else {
+                bot.lookAt(playerPos.x, 1, playerPos.z);
+            }
+
+            // Shoot logic
+            if(dist < 30 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 800 : 1500)) {
+                // Check line of sight roughly
+                const rayDir = new THREE.Vector3().subVectors(playerPos, bot.position).normalize();
+                // Add inaccuracy
+                rayDir.x += (Math.random() - 0.5) * accuracySpread;
+                rayDir.z += (Math.random() - 0.5) * accuracySpread;
+                
+                const raycaster = new THREE.Raycaster(bot.position, rayDir);
+                const hits = raycaster.intersectObject(controls.getObject()); // Hit player capsule approx
+                
+                // Simple distance check for hit since player isn't a mesh
+                if(dist < 20 && Math.random() > (botDifficulty === 'easy' ? 0.6 : 0.2)) {
+                    playerHealth -= (botDifficulty === 'hard' ? 25 : 10);
+                    updateHUD();
+                    // Red flash effect could go here
+                    if(playerHealth <= 0) endGame(false);
+                }
+                
+                bot.userData.lastShot = time;
+            }
+        });
+    }
+
+    function updateHUD() {
+        uiAmmo.innerText = currentAmmo;
+        uiReserve.innerText = reserveAmmo;
+        uiHP.innerText = playerHealth;
+        
+        if(playerHealth < 30) uiHP.style.color = 'red';
+        else uiHP.style.color = 'white';
+    }
+
+    function endGame(win) {
+        controls.unlock();
+        gameOverMenu.style.display = 'block';
+        mainMenu.style.display = 'none';
+        document.getElementById('end-title').innerText = win ? "ПОБЕДА!" : "ВАС УБИЛИ";
+        document.getElementById('end-title').style.color = win ? "#0f0" : "#f00";
+        document.getElementById('end-reason').innerText = win ? "Все враги уничтожены." : "Попробуйте еще раз.";
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const time = performance.now();
+        const delta = (time - prevTime) / 1000;
+
+        if (controls.isLocked === true) {
+            // Physics / Movement
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            velocity.y -= 9.8 * 20.0 * delta; // Gravity
+
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.normalize();
+
+            if (moveForward || moveBackward) velocity.z -= direction.z * PLAYER_SPEED * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * PLAYER_SPEED * delta;
+
+            controls.moveRight(-velocity.x * delta);
+            controls.moveForward(-velocity.z * delta);
+            controls.getObject().position.y += (velocity.y * delta);
+
+            // Floor Collision
+            if (controls.getObject().position.y < PLAYER_HEIGHT) {
+                velocity.y = 0;
+                controls.getObject().position.y = PLAYER_HEIGHT;
+                canJump = true;
+            }
+            
+            // Simple Wall Collision (Boundary)
+            const pos = controls.getObject().position;
+            if(pos.x > 95) pos.x = 95;
+            if(pos.x < -95) pos.x = -95;
+            if(pos.z > 95) pos.z = 95;
+            if(pos.z < -95) pos.z = -95;
+
+            // Bot AI
+            botLogic(delta);
+            
+            // Weapon Sway / Return from recoil
+            camera.rotation.x *= 0.9;
+        }
+
+        prevTime = time;
+        renderer.render(scene, camera);
+    }
+
+    init();
+
+</script>
+</body>
+</html>
