@@ -32,7 +32,6 @@
 </head>
 <body>
 
-<!-- UI Elements -->
 <div id="ui-layer">
     <div id="kill-feed"></div>
     <div id="crosshair">
@@ -46,7 +45,6 @@
     </div>
 </div>
 
-<!-- Main Menu -->
 <div id="menu-overlay">
     <div class="panel" id="main-menu">
         <h1>CS: WEB PROTOTYPE</h1>
@@ -85,9 +83,7 @@
     </div>
 </div>
 
-<!-- Three.js Library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<!-- PointerLockControls -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
 
 <script>
@@ -215,6 +211,7 @@
         reserveAmmo = 90;
         isReloading = false;
         bots = [];
+        obstacles = []; // Очищаем старые коллизии препятствий
         updateHUD();
         
         // Clear Scene Objects (except lights/camera)
@@ -233,12 +230,8 @@
         spawnBots();
         createWeaponModel();
         
-        // Force hide menu immediately
-        mainMenu.style.display = 'none';
-        gameOverMenu.style.display = 'none';
-        menuOverlay.style.display = 'none';
-        
-        // Request pointer lock
+        // ИСПРАВЛЕНИЕ: Мы убрали отсюда принудительное скрытие стилей menuOverlay.
+        // Теперь мы просто запрашиваем Pointer Lock, и браузер без ошибок передает фокус.
         controls.lock();
     }
 
@@ -290,7 +283,11 @@
     }
 
     function createWeaponModel() {
-        // Simple gun model attached to camera
+        // Удаляем старые модели оружия из камеры (если они были при прошлых стартах)
+        for (let i = camera.children.length - 1; i >= 0; i--) {
+            camera.remove(camera.children[i]);
+        }
+
         const gunGroup = new THREE.Group();
         
         let color = 0x222222;
@@ -381,7 +378,6 @@
     }
 
     function createBulletTrail(raycaster) {
-        // Simple flash line
         const material = new THREE.LineBasicMaterial({ color: 0xffff00 });
         const points = [];
         const start = new THREE.Vector3(0.2, -0.2, -0.5).applyMatrix4(camera.matrixWorld);
@@ -443,7 +439,6 @@
         bots.forEach(bot => {
             const dist = bot.position.distanceTo(playerPos);
             const speed = botDifficulty === 'easy' ? 15 : (botDifficulty === 'hard' ? 45 : 25);
-            const reactionDelay = botDifficulty === 'easy' ? 1000 : (botDifficulty === 'hard' ? 200 : 500);
             const accuracySpread = botDifficulty === 'easy' ? 0.5 : (botDifficulty === 'hard' ? 0.05 : 0.2);
 
             // Move towards player if far, stop if close
@@ -458,20 +453,15 @@
 
             // Shoot logic
             if(dist < 30 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 800 : 1500)) {
-                // Check line of sight roughly
                 const rayDir = new THREE.Vector3().subVectors(playerPos, bot.position).normalize();
-                // Add inaccuracy
                 rayDir.x += (Math.random() - 0.5) * accuracySpread;
                 rayDir.z += (Math.random() - 0.5) * accuracySpread;
                 
                 const raycaster = new THREE.Raycaster(bot.position, rayDir);
-                const hits = raycaster.intersectObject(controls.getObject()); // Hit player capsule approx
                 
-                // Simple distance check for hit since player isn't a mesh
                 if(dist < 20 && Math.random() > (botDifficulty === 'easy' ? 0.6 : 0.2)) {
                     playerHealth -= (botDifficulty === 'hard' ? 25 : 10);
                     updateHUD();
-                    // Red flash effect could go here
                     if(playerHealth <= 0) endGame(false);
                 }
                 
@@ -553,7 +543,6 @@
     }
 
     init();
-
 </script>
 </body>
 </html>
