@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Camera & Physics Fix</title>
+    <title>Browser CS Prototype - Final Bot Physics Fix</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 5; }
@@ -140,8 +140,8 @@
     let platforms = []; 
     
     let gunMesh, muzzleFlash;
-    let gunBasePos = new THREE.Vector3(0.24, -0.24, -0.55); // Дефолтное положение оружия
-    let recoilY = 0; // Величина смещения оружия назад/вверх
+    let gunBasePos = new THREE.Vector3(0.24, -0.24, -0.55); 
+    let recoilY = 0; 
     
     let botDifficulty = 'medium', mapType = 'dust2_style', weaponSkin = 'default', botCount = 6;
     let currentWeapon = 'ak47';
@@ -211,7 +211,6 @@
         spawnBots();
         createWeaponModel();
         
-        // Решение бага спавна: жестко крепим игрока на пол Y=0 (плюс рост) на старте
         if(cameraHolder) {
             cameraHolder.position.set(5, PLAYER_HEIGHT, 25);
         }
@@ -395,7 +394,6 @@
         muzzleFlash.position.set(0, 0.02, -(wL/2 + 0.4));
         gunMesh.add(muzzleFlash);
 
-        // Прикрепляем к камере
         gunMesh.position.copy(gunBasePos);
         camera.add(gunMesh);
     }
@@ -426,7 +424,8 @@
                 botGroup.position.set((Math.random() - 0.5) * 30, 0, (Math.random() - 0.5) * 30);
             }
             
-            botGroup.userData = { health: 100, lastShot: 0, leftLeg, rightLeg, animOffset: Math.random()*5 };
+            // Инициализация вертикальной скорости бота (для гравитации)
+            botGroup.userData = { health: 100, lastShot: 0, leftLeg, rightLeg, animOffset: Math.random()*5, velocityY: 0 };
             scene.add(botGroup);
             bots.push(botGroup);
         }
@@ -442,12 +441,11 @@
         currentAmmo--;
         updateHUD();
 
-        // Применяем визуальную отдачу к ОРУЖИЮ, а не к камере!
         recoilY += conf.recoil;
         if(gunMesh) {
-            gunMesh.position.z = gunBasePos.z + conf.recoil; // Сдвиг назад
-            gunMesh.position.y = gunBasePos.y + (conf.recoil * 0.5); // Подскок вверх
-            gunMesh.rotation.x = -conf.recoil * 2; // Задирание ствола
+            gunMesh.position.z = gunBasePos.z + conf.recoil; 
+            gunMesh.position.y = gunBasePos.y + (conf.recoil * 0.5); 
+            gunMesh.rotation.x = -conf.recoil * 2; 
         }
         
         if(muzzleFlash) { muzzleFlash.material.opacity = 1; setTimeout(() => muzzleFlash.material.opacity = 0, 50); }
@@ -509,21 +507,50 @@
         const time = Date.now();
 
         bots.forEach(bot => {
+            let isMoving = false;
             const dist = bot.position.distanceTo(playerPos);
             const speed = botDifficulty === 'easy' ? 4 : (botDifficulty === 'hard' ? 9 : 6);
 
             bot.lookAt(playerPos.x, bot.position.y, playerPos.z);
 
-            if(dist > 5) {
+            // 1. Физика гравитации и пола индивидуально для каждого бота
+            bot.userData.velocityY -= 28.0 * delta; // Действие гравитации на бота
+            bot.position.y += bot.userData.velocityY * delta;
+
+            let botGround = 0;
+            const raycasterBot = new THREE.Raycaster(new THREE.Vector3(bot.position.x, bot.position.y + 0.5, bot.position.z), new THREE.Vector3(0, -1, 0));
+            const botIntersects = raycasterBot.intersectObjects(platforms);
+
+            if (botIntersects.length > 0) {
+                // Находим высоту пола прямо под ботом
+                botGround = (bot.position.y + 0.5) - botIntersects[0].distance;
+            }
+
+            // Коррекция: если бот упал на пол/платформу
+            if (bot.position.y <= botGround) {
+                bot.position.y = botGround;
+                bot.userData.velocityY = 0;
+            }
+
+            // 2. Логика преследования (только если бот стоит на земле)
+            if (dist > 5 && bot.position.y <= botGround + 0.05) {
                 const dir = new THREE.Vector3().subVectors(playerPos, bot.position).normalize();
                 dir.y = 0; 
                 bot.position.add(dir.multiplyScalar(speed * delta));
+                isMoving = true;
+            }
 
+            // 3. Анимация ног (двигаются только при ходьбе по земле)
+            if (isMoving) {
                 const wave = Math.sin(time * 0.01 + bot.userData.animOffset);
                 bot.userData.leftLeg.rotation.x = wave * 0.6;
                 bot.userData.rightLeg.rotation.x = -wave * 0.6;
+            } else {
+                bot.userData.leftLeg.rotation.x = THREE.MathUtils.lerp(bot.userData.leftLeg.rotation.x, 0, 0.2);
+                bot.userData.rightLeg.rotation.x = THREE.MathUtils.lerp(bot.userData.rightLeg.rotation.x, 0, 0.2);
             }
 
+            // 4. Стрельба бота
             if(dist < 15 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 900 : 1700)) {
                 playerHealth -= (botDifficulty === 'hard' ? 12 : 6);
                 updateHUD();
@@ -557,14 +584,12 @@
         requestAnimationFrame(animate);
         const time = performance.now();
         let delta = (time - prevTime) / 1000;
-        if(delta > 0.1) delta = 0.1; // Защита от резких скачков лагов при старте
+        if(delta > 0.1) delta = 0.1; 
 
         if (controls && controls.isLocked && isGameActive && cameraHolder) {
             
-            // 1. Применяем гравитацию
             velocity.y -= 28.0 * delta; 
 
-            // 2. Расчет ходьбы
             const frontVector = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
             const sideVector = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
             
@@ -586,10 +611,8 @@
             cameraHolder.position.z += moveVector.z;
             if (checkPlayerCollision(cameraHolder.position)) cameraHolder.position.z = oldPos.z;
 
-            // Смещение по вертикали (падение / прыжок)
             cameraHolder.position.y += (velocity.y * delta);
 
-            // 3. Жесткая и надежная проверка земли через Raycast вниз
             let currentGround = 0;
             const raycasterDown = new THREE.Raycaster(
                 new THREE.Vector3(cameraHolder.position.x, cameraHolder.position.y, cameraHolder.position.z), 
@@ -598,19 +621,16 @@
             const platformIntersects = raycasterDown.intersectObjects(platforms);
 
             if (platformIntersects.length > 0) {
-                // Если луч пересекает пол/платформу на адекватном расстоянии под нами
                 let dist = platformIntersects[0].distance;
                 currentGround = cameraHolder.position.y - dist;
             }
 
-            // Коррекция падения: если опустились ниже уровня земли
             if (cameraHolder.position.y <= currentGround + PLAYER_HEIGHT) {
                 velocity.y = 0;
                 cameraHolder.position.y = currentGround + PLAYER_HEIGHT;
                 canJump = true;
             }
 
-            // 4. Плавное гашение отдачи ОРУЖИЯ обратно к исходной точке
             if(gunMesh) {
                 gunMesh.position.z = THREE.MathUtils.lerp(gunMesh.position.z, gunBasePos.z, 0.15);
                 gunMesh.position.y = THREE.MathUtils.lerp(gunMesh.position.y, gunBasePos.y, 0.15);
