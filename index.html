@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Collision Fix</title>
+    <title>Browser CS Prototype - Full Fixed Version</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 5; }
@@ -98,7 +98,7 @@
         
         <button class="start-btn" onclick="startGame()">В БОЙ</button>
         <button class="sec-btn" onclick="toggleSettings(true)">Настройки</button>
-        <p style="font-size: 11px; color: #aaa; margin-top: 10px;">Баг с рампой и спавном ботов полностью устранен!</p>
+        <p style="font-size: 11px; color: #aaa; margin-top: 10px;">Зажимай Left Ctrl, чтобы присесть. Ошибки геометрии и ног ботов устранены!</p>
     </div>
 
     <div class="panel" id="settings-menu" style="display: none;">
@@ -150,8 +150,8 @@
     let isReloading = false;
     let reloadTimer = 0; 
     let bots = [];
-    let obstacles = []; // Массив THREE.Mesh (вместо Box3) для точного рейкастинга стен
-    let platforms = []; // Поверхности для ходьбы (включая рампы)
+    let obstacles = []; 
+    let platforms = []; 
     
     let gunMesh, muzzleFlash;
     let gunBasePos = new THREE.Vector3(0.24, -0.24, -0.55); 
@@ -340,7 +340,6 @@
         if (mapType === 'dust2_style') { 
             texType = 'sand'; floorColor = '#d1b28c'; fogColor = 0xe8ccaa;
             blocks.push({x: 25, y: 2, z: -20, w: 25, h: 4, d: 25, type: 'platform'}); 
-            // Исправленная рампа: добавили правильный угол наклона геометрии для трассировки лучей
             blocks.push({x: 25, y: 1, z: -2, w: 6, h: 2, d: 13, type: 'ramp', rotX: 0.3});
             blocks.push({x: 0, y: 3, z: -35, w: 4, h: 6, d: 30, type: 'wall'}); 
             blocks.push({x: 38, y: 2.5, z: 10, w: 4, h: 5, d: 40, type: 'wall'});
@@ -385,7 +384,6 @@
             if (b.rotX) mesh.rotation.x = b.rotX;
             scene.add(mesh);
             
-            // Если объект плоский или наклонный — добавляем в платформы, если стена — в препятствия
             if (b.type === 'platform' || b.type === 'ramp') {
                 platforms.push(mesh);
             } else {
@@ -394,13 +392,11 @@
         });
     }
 
-    // Улучшенная проверка боковых коллизий (Рейкастинг по 4 направлениям)
     function checkCollision(position, radius) {
         const directions = [
             new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
             new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)
         ];
-        // Пускаем лучи на уровне пояса игрока
         const origin = new THREE.Vector3(position.x, position.y + 0.5, position.z);
         const raycaster = new THREE.Raycaster(origin, new THREE.Vector3(), 0, radius);
 
@@ -459,31 +455,32 @@
             const clothesMat = new THREE.MeshStandardMaterial({ color: mapType.includes('cache') ? 0x3d473d : 0x735135 });
             const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdbac });
 
+            const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.5, 0.24), new THREE.MeshStandardMaterial({color:0x1c1c1c}));
+            leftLeg.position.set(-0.18, 0.25, 0); botGroup.add(leftLeg);
+            
+            const rightLeg = leftLeg.clone(); 
+            rightLeg.position.x = 0.18; botGroup.add(rightLeg);
+
             const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.4), clothesMat);
-            torso.position.y = 0.45; botGroup.add(torso);
+            torso.position.y = 0.95; botGroup.add(torso);
 
             const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), skinMat);
-            head.position.y = 1.05; 
+            head.position.y = 1.575; 
             head.name = "bot_head"; 
             botGroup.add(head);
-
-            const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.5, 0.24), new THREE.MeshStandardMaterial({color:0x1c1c1c}));
-            leftLeg.position.set(-0.18, -0.15, 0); botGroup.add(leftLeg);
-            const rightLeg = leftLeg.clone(); rightLeg.position.x = 0.18; botGroup.add(rightLeg);
 
             const botGun = new THREE.Group();
             const gBody = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, 0.45), new THREE.MeshStandardMaterial({ color: 0x222222 }));
             const gBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.25), new THREE.MeshStandardMaterial({ color: 0x111111 }));
             gBarrel.rotation.x = Math.PI / 2; gBarrel.position.set(0, 0.02, -0.3);
             botGun.add(gBody, gBarrel);
-            botGun.position.set(0.3, 0.4, -0.3);
+            botGun.position.set(0.3, 0.9, -0.3);
             botGroup.add(botGun);
 
             const bFlash = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0 }));
-            bFlash.position.set(0.3, 0.42, -0.45);
+            bFlash.position.set(0.3, 0.92, -0.45);
             botGroup.add(bFlash);
 
-            // Безопасный алгоритм спавна: боты больше не появляются внутри текстур блоков
             let spawnX, spawnZ, spawnY = 0;
             let validSpawn = false;
             let attempts = 0;
@@ -493,13 +490,11 @@
                 spawnZ = (Math.random() - 0.5) * 60;
                 attempts++;
 
-                // Ищем высоту пола в этой точке
                 const spawnRay = new THREE.Raycaster(new THREE.Vector3(spawnX, 20, spawnZ), new THREE.Vector3(0, -1, 0));
                 const hits = spawnRay.intersectObjects(platforms);
                 
                 if(hits.length > 0) {
                     spawnY = hits[0].point.y;
-                    // Проверяем, не задевает ли бот стены в этой точке
                     if(!checkCollision(new THREE.Vector3(spawnX, spawnY, spawnZ), BOT_RADIUS + 0.2)) {
                         validSpawn = true;
                     }
@@ -646,7 +641,6 @@
             bot.userData.velocityY -= 28.0 * delta; 
             bot.position.y += bot.userData.velocityY * delta;
 
-            // Точный просчет рельефа для ботов через Raycasting
             let botGround = 0;
             const raycasterBot = new THREE.Raycaster(new THREE.Vector3(bot.position.x, bot.position.y + 2.0, bot.position.z), new THREE.Vector3(0, -1, 0));
             const botIntersects = raycasterBot.intersectObjects(platforms);
@@ -658,7 +652,6 @@
                 dir.y = 0; 
                 const nextBotPos = bot.position.clone().add(dir.clone().multiplyScalar(speed * delta));
                 
-                // Боты тоже проверяют коллизии со стенами
                 if (!checkCollision(nextBotPos, BOT_RADIUS)) {
                     bot.position.copy(nextBotPos);
                     isMoving = true;
@@ -667,7 +660,15 @@
 
             if (isMoving) {
                 const wave = Math.sin(time * 0.01 + bot.userData.animOffset);
-                bot.userData.leftLeg.rotation.x = wave * 0.6; bot.userData.rightLeg.rotation.x = -wave * 0.6;
+                bot.userData.leftLeg.rotation.x = wave * 0.4;
+                bot.userData.rightLeg.rotation.x = -wave * 0.4;
+                bot.userData.leftLeg.position.y = 0.25 + Math.abs(wave) * 0.05;
+                bot.userData.rightLeg.position.y = 0.25 + Math.abs(-wave) * 0.05;
+            } else {
+                bot.userData.leftLeg.rotation.x = 0;
+                bot.userData.rightLeg.rotation.x = 0;
+                bot.userData.leftLeg.position.y = 0.25;
+                bot.userData.rightLeg.position.y = 0.25;
             }
 
             if(dist < 18 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 700 : 1500)) {
@@ -734,18 +735,15 @@
 
             const oldPos = cameraHolder.position.clone();
             
-            // Проверка горизонтальных коллизий (Стены) перед шагом
             cameraHolder.position.x += moveVector.x;
             if (checkPlayerWithBots(cameraHolder.position)) cameraHolder.position.x = oldPos.x;
 
             cameraHolder.position.z += moveVector.z;
             if (checkPlayerWithBots(cameraHolder.position)) cameraHolder.position.z = oldPos.z;
 
-            // Гравитация и просчет высоты рельефа/рампы (Raycasting)
             cameraHolder.position.y += (velocity.y * delta);
 
             let currentGround = 0;
-            // Пускаем луч сверху вниз с небольшим запасом, чтобы ловить наклонные рампы
             const raycasterDown = new THREE.Raycaster(new THREE.Vector3(cameraHolder.position.x, cameraHolder.position.y + 3.0, cameraHolder.position.z), new THREE.Vector3(0, -1, 0));
             const platformIntersects = raycasterDown.intersectObjects(platforms);
             
@@ -756,7 +754,6 @@
             let targetHeight = isCrouching ? CROUCH_HEIGHT : STAND_HEIGHT;
             currentPlayerHeight = THREE.MathUtils.lerp(currentPlayerHeight, targetHeight, delta * 10);
 
-            // Игрок твердо стоит на поверхности (или на рампе)
             if (cameraHolder.position.y <= currentGround + currentPlayerHeight) {
                 velocity.y = 0; 
                 cameraHolder.position.y = currentGround + currentPlayerHeight; 
