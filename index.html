@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Recoil & Headshots</title>
+    <title>Browser CS Prototype - Fixed Recoil</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 5; }
@@ -98,7 +98,7 @@
         
         <button class="start-btn" onclick="startGame()">В БОЙ</button>
         <button class="sec-btn" onclick="toggleSettings(true)">Настройки</button>
-        <p style="font-size: 11px; color: #aaa; margin-top: 10px;">Ваншоты в голову добавлены! Контролируй отдачу оружия.</p>
+        <p style="font-size: 11px; color: #aaa; margin-top: 10px;">Баг с тряской убран. Отдача оптимизирована!</p>
     </div>
 
     <div class="panel" id="settings-menu" style="display: none;">
@@ -156,21 +156,20 @@
     let gunBasePos = new THREE.Vector3(0.24, -0.24, -0.55); 
     let currentGunPos = new THREE.Vector3().copy(gunBasePos);
     
-    // ПЕРЕМЕННЫЕ ДЛЯ СИСТЕМЫ ОТДАЧИ
-    let recoilPitch = 0; // На сколько камеру подкинуло вверх
-    let recoilYaw = 0;   // Смещение камеры влево/вправо при зажиме
-    let continuousShots = 0; // Количество выстрелов в одной очереди
+    // ОПТИМИЗИРОВАННЫЕ ПЕРЕМЕННЫЕ ОТДАЧИ
+    let recoilActivePitch = 0; // Накопленное смещение вверх
+    let continuousShots = 0; 
     
     let botDifficulty = 'medium', mapType = 'dust2_style', weaponSkin = 'default', botCount = 6;
     let currentWeapon = 'ak47';
     let isMouseDown = false; 
     let isScoped = false; 
 
-    // Параметры оружия с учетом новой отдачи
+    // Настройки уменьшенной, комфортной отдачи
     const WEAPON_CONFIGS = {
-        ak47: { name: 'AK-47', maxAmmo: 30, reserve: 90, damage: 34, fireRate: 130, recoilUp: 0.04, recoilSide: 0.02, color: 0x4a2f13, auto: true },
-        awp:  { name: 'AWP Sniper', maxAmmo: 5, reserve: 20, damage: 115, fireRate: 1300, recoilUp: 0.25, recoilSide: 0.0, color: 0x1b4d22, auto: false },
-        p90:  { name: 'P90 SMG', maxAmmo: 50, reserve: 150, damage: 19, fireRate: 65, recoilUp: 0.015, recoilSide: 0.012, color: 0x333333, auto: true }
+        ak47: { name: 'AK-47', maxAmmo: 30, reserve: 90, damage: 34, fireRate: 130, recoilUp: 0.006, recoilSide: 0.003, color: 0x4a2f13, auto: true },
+        awp:  { name: 'AWP Sniper', maxAmmo: 5, reserve: 20, damage: 115, fireRate: 1300, recoilUp: 0.06, recoilSide: 0.0, color: 0x1b4d22, auto: false },
+        p90:  { name: 'P90 SMG', maxAmmo: 50, reserve: 150, damage: 19, fireRate: 65, recoilUp: 0.002, recoilSide: 0.0015, color: 0x333333, auto: true }
     };
 
     let lastFireTime = 0;
@@ -246,7 +245,7 @@
         document.getElementById('weapon-display').innerText = wng.name;
 
         playerHealth = 100; isReloading = false; toggleZoom(true); 
-        recoilPitch = 0; recoilYaw = 0; continuousShots = 0;
+        recoilActivePitch = 0; continuousShots = 0;
         bots = []; obstacles = []; platforms = [];
         updateHUD();
         
@@ -443,10 +442,9 @@
             const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.4), clothesMat);
             torso.position.y = 1.15; botGroup.add(torso);
 
-            // ГОЛОВА БОТА (ХИТБОКС ДЛЯ ВАНШОТА)
             const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), skinMat);
             head.position.y = 1.75; 
-            head.name = "bot_head"; // Пометка для проверки при попадании луча
+            head.name = "bot_head"; 
             botGroup.add(head);
 
             const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.7, 0.24), new THREE.MeshStandardMaterial({color:0x1c1c1c}));
@@ -485,32 +483,36 @@
 
         if(currentWeapon === 'awp' && isScoped) toggleZoom(true);
 
-        // УВЕЛИЧЕНИЕ ОТДАЧИ С КАЖДЫМ ВЫСТРЕЛОМ (СПРЕЙ)
         continuousShots++;
-        let currentRecoilUp = conf.recoilUp * (1 + continuousShots * 0.15);
-        let currentRecoilSide = (Math.random() - 0.5) * conf.recoilSide * (continuousShots * 0.3);
         
-        recoilPitch += currentRecoilUp;
-        recoilYaw += currentRecoilSide;
+        // СЛАБАЯ, КОМФОРТНАЯ ОТДАЧА С ОГРАНИЧЕНИЕМ (Срезаем безумный зажим)
+        let factor = Math.min(continuousShots, 10); 
+        let currentRecoilUp = conf.recoilUp * (1 + factor * 0.2);
+        let currentRecoilSide = (Math.random() - 0.5) * conf.recoilSide * (factor * 0.2);
+        
+        // Импульс отдачи применяется ТОЛЬКО в момент выстрела напрямую к камере
+        camera.rotation.x += currentRecoilUp;
+        camera.rotation.y += currentRecoilSide;
+        
+        // Логируем для возврата
+        recoilActivePitch += currentRecoilUp;
 
-        // Эффект подергивания оружия в руках
         if(gunMesh && !isScoped) {
-            gunMesh.position.z = gunBasePos.z + currentRecoilUp * 1.2; 
-            gunMesh.position.y = gunBasePos.y + (currentRecoilUp * 0.3); 
-            gunMesh.rotation.x = -currentRecoilUp * 1.5; 
+            gunMesh.position.z = gunBasePos.z + currentRecoilUp * 0.8; 
+            gunMesh.position.y = gunBasePos.y + (currentRecoilUp * 0.15); 
+            gunMesh.rotation.x = -currentRecoilUp * 0.8; 
         }
         
         if(muzzleFlash && !isScoped) { muzzleFlash.material.opacity = 1; setTimeout(() => muzzleFlash.material.opacity = 0, 40); }
 
-        // Расчет направления пули с учетом отдачи
         const raycaster = new THREE.Raycaster();
         let targetScreenX = 0;
         let targetScreenY = 0;
 
-        // Если зажим длинный — пули летят выше перекрестия прицела
+        // Небольшое смещение пуль от спрея на экране
         if (!isScoped) {
-            targetScreenY += (continuousShots * 0.012); 
-            targetScreenX += (Math.random() - 0.5) * (continuousShots * 0.01);
+            targetScreenY += (factor * 0.005); 
+            targetScreenX += (Math.random() - 0.5) * (factor * 0.004);
         }
 
         raycaster.setFromCamera(new THREE.Vector2(targetScreenX, targetScreenY), camera);
@@ -520,18 +522,17 @@
 
         for (let i = 0; i < intersects.length; i++) {
             let hitMesh = intersects[i].object;
-            let isHeadshot = (hitMesh.name === "bot_head"); // Проверяем, попали ли в голову
+            let isHeadshot = (hitMesh.name === "bot_head"); 
 
-            // Ищем корень бота, чтобы нанести урон
             let hitBot = hitMesh;
             while (hitBot.parent && !bots.includes(hitBot)) hitBot = hitBot.parent;
 
             if (bots.includes(hitBot)) {
                 if (isHeadshot) {
-                    hitBot.userData.health = 0; // ВАНШОТ В ГОЛОВУ!
+                    hitBot.userData.health = 0; 
                     killBot(hitBot, true);
                 } else {
-                    hitBot.userData.health -= conf.damage; // Попадание в тело
+                    hitBot.userData.health -= conf.damage; 
                     if(hitBot.userData.health <= 0) killBot(hitBot, false);
                 }
                 break;
@@ -663,22 +664,12 @@
             
             if(isMouseDown && WEAPON_CONFIGS[currentWeapon].auto) shoot();
 
-            // СГЛАЖИВАНИЕ И ВОЗВРАТ КАМЕРЫ ОТ ОТДАЧИ (Рекавери)
-            if (recoilPitch > 0) {
-                let pitchReduce = delta * 0.3; // Скорость затухания отдачи
-                camera.rotation.x += pitchReduce; // Возвращаем взгляд вниз
-                recoilPitch -= pitchReduce;
-            }
-            if (Math.abs(recoilYaw) > 0) {
-                let yawReduce = delta * 0.2 * Math.sign(recoilYaw);
-                camera.rotation.y -= yawReduce;
-                recoilYaw -= yawReduce;
-            }
-
-            // Применяем текущее смещение от выстрела к камере
-            if (recoilPitch > 0.001) {
-                camera.rotation.x -= recoilPitch * 0.1; // Подкидывает вверх
-                camera.rotation.y += recoilYaw * 0.05;  // Трясет в стороны
+            // ПЛАВНЫЙ И ЧИСТЫЙ ВОЗВРАТ КАМЕРЫ (Только когда НЕ стреляем!)
+            if (!isMouseDown && recoilActivePitch > 0) {
+                let recovery = delta * 0.15; // Скорость возврата прицела вниз
+                camera.rotation.x -= recovery;
+                recoilActivePitch -= recovery;
+                if(recoilActivePitch < 0) recoilActivePitch = 0;
             }
 
             velocity.y -= 28.0 * delta; 
