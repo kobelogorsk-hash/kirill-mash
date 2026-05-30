@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Full Physics Fix</title>
+    <title>Browser CS Prototype - Camera & Physics Fix</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 5; }
@@ -140,17 +140,16 @@
     let platforms = []; 
     
     let gunMesh, muzzleFlash;
-    let bobTime = 0, recoilY = 0; 
+    let gunBasePos = new THREE.Vector3(0.24, -0.24, -0.55); // Дефолтное положение оружия
+    let recoilY = 0; // Величина смещения оружия назад/вверх
+    
     let botDifficulty = 'medium', mapType = 'dust2_style', weaponSkin = 'default', botCount = 6;
     let currentWeapon = 'ak47';
 
-    // Базовый наклон, чтобы компенсировать и возвращать отдачу в исходную точку
-    let baseCameraRotationX = 0; 
-
     const WEAPON_CONFIGS = {
-        ak47: { name: 'AK-47', maxAmmo: 30, reserve: 90, damage: 35, fireRate: 140, recoil: 0.05, color: 0x4a2f13 },
-        awp:  { name: 'AWP Sniper', maxAmmo: 5, reserve: 20, damage: 100, fireRate: 1200, recoil: 0.20, color: 0x1b4d22 },
-        p90:  { name: 'P90 SMG', maxAmmo: 50, reserve: 150, damage: 18, fireRate: 70, recoil: 0.02, color: 0x333333 }
+        ak47: { name: 'AK-47', maxAmmo: 30, reserve: 90, damage: 35, fireRate: 140, recoil: 0.08, color: 0x4a2f13 },
+        awp:  { name: 'AWP Sniper', maxAmmo: 5, reserve: 20, damage: 100, fireRate: 1200, recoil: 0.25, color: 0x1b4d22 },
+        p90:  { name: 'P90 SMG', maxAmmo: 50, reserve: 150, damage: 18, fireRate: 70, recoil: 0.03, color: 0x333333 }
     };
 
     let lastFireTime = 0;
@@ -194,7 +193,6 @@
         platforms = [];
         updateHUD();
         
-        // Очищаем старые 3D объекты
         for(let i = scene.children.length - 1; i >= 0; i--){
             if(scene.children[i] !== cameraHolder) {
                 scene.remove(scene.children[i]);
@@ -213,13 +211,11 @@
         spawnBots();
         createWeaponModel();
         
-        // Установка позиции игрока на уровень пола при старте
+        // Решение бага спавна: жестко крепим игрока на пол Y=0 (плюс рост) на старте
         if(cameraHolder) {
             cameraHolder.position.set(5, PLAYER_HEIGHT, 25);
         }
         velocity.set(0, 0, 0);
-        recoilY = 0;
-        if (camera) baseCameraRotationX = camera.rotation.x;
         
         controls.lock();
         menuOverlay.style.display = 'none';
@@ -399,7 +395,8 @@
         muzzleFlash.position.set(0, 0.02, -(wL/2 + 0.4));
         gunMesh.add(muzzleFlash);
 
-        gunMesh.position.set(0.24, -0.24, -0.55);
+        // Прикрепляем к камере
+        gunMesh.position.copy(gunBasePos);
         camera.add(gunMesh);
     }
 
@@ -445,8 +442,14 @@
         currentAmmo--;
         updateHUD();
 
-        // Смещение вектора отдачи вверх
-        recoilY += conf.recoil; 
+        // Применяем визуальную отдачу к ОРУЖИЮ, а не к камере!
+        recoilY += conf.recoil;
+        if(gunMesh) {
+            gunMesh.position.z = gunBasePos.z + conf.recoil; // Сдвиг назад
+            gunMesh.position.y = gunBasePos.y + (conf.recoil * 0.5); // Подскок вверх
+            gunMesh.rotation.x = -conf.recoil * 2; // Задирание ствола
+        }
+        
         if(muzzleFlash) { muzzleFlash.material.opacity = 1; setTimeout(() => muzzleFlash.material.opacity = 0, 50); }
 
         const raycaster = new THREE.Raycaster();
@@ -553,11 +556,15 @@
     function animate() {
         requestAnimationFrame(animate);
         const time = performance.now();
-        const delta = (time - prevTime) / 1000;
+        let delta = (time - prevTime) / 1000;
+        if(delta > 0.1) delta = 0.1; // Защита от резких скачков лагов при старте
 
         if (controls && controls.isLocked && isGameActive && cameraHolder) {
-            velocity.y -= 28.0 * delta; // Сила гравитации
+            
+            // 1. Применяем гравитацию
+            velocity.y -= 28.0 * delta; 
 
+            // 2. Расчет ходьбы
             const frontVector = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
             const sideVector = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
             
@@ -579,32 +586,40 @@
             cameraHolder.position.z += moveVector.z;
             if (checkPlayerCollision(cameraHolder.position)) cameraHolder.position.z = oldPos.z;
 
+            // Смещение по вертикали (падение / прыжок)
             cameraHolder.position.y += (velocity.y * delta);
 
-            // Обработка поверхности земли под ногами
+            // 3. Жесткая и надежная проверка земли через Raycast вниз
             let currentGround = 0;
-            const raycasterDown = new THREE.Raycaster(cameraHolder.position, new THREE.Vector3(0, -1, 0));
+            const raycasterDown = new THREE.Raycaster(
+                new THREE.Vector3(cameraHolder.position.x, cameraHolder.position.y, cameraHolder.position.z), 
+                new THREE.Vector3(0, -1, 0)
+            );
             const platformIntersects = raycasterDown.intersectObjects(platforms);
 
-            if (platformIntersects.length > 0 && platformIntersects[0].distance <= PLAYER_HEIGHT + 0.5) {
-                currentGround = cameraHolder.position.y - platformIntersects[0].distance + PLAYER_HEIGHT;
+            if (platformIntersects.length > 0) {
+                // Если луч пересекает пол/платформу на адекватном расстоянии под нами
+                let dist = platformIntersects[0].distance;
+                currentGround = cameraHolder.position.y - dist;
             }
 
+            // Коррекция падения: если опустились ниже уровня земли
             if (cameraHolder.position.y <= currentGround + PLAYER_HEIGHT) {
                 velocity.y = 0;
                 cameraHolder.position.y = currentGround + PLAYER_HEIGHT;
                 canJump = true;
             }
 
-            // Плавное гашение отдачи и возвращение камеры на сохраненный уровень взгляда
-            recoilY = THREE.MathUtils.lerp(recoilY, 0, 0.1);
-            camera.rotation.x = baseCameraRotationX - recoilY; 
+            // 4. Плавное гашение отдачи ОРУЖИЯ обратно к исходной точке
+            if(gunMesh) {
+                gunMesh.position.z = THREE.MathUtils.lerp(gunMesh.position.z, gunBasePos.z, 0.15);
+                gunMesh.position.y = THREE.MathUtils.lerp(gunMesh.position.y, gunBasePos.y, 0.15);
+                gunMesh.rotation.x = THREE.MathUtils.lerp(gunMesh.rotation.x, 0, 0.15);
+            }
 
             botLogic(delta);
-        } else {
-            // Если игрок во вращает камеру мышкой без стрельбы, обновляем базовый угол наклона
-            if (camera) baseCameraRotationX = camera.rotation.x;
         }
+        
         prevTime = time;
         if (renderer && scene && camera) renderer.render(scene, camera);
     }
