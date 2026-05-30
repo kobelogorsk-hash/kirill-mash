@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Textures & Bot Collision</title>
+    <title>Browser CS Prototype - Ultimate Physics & Bot Weapons</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 5; }
@@ -72,9 +72,9 @@
         <div class="control-group">
             <label>Карта</label>
             <select id="map-select">
-                <option value="dust2_style">Dust II (Песочные Стены)</option>
-                <option value="cache">de_cache (Каменные Стены)</option>
-                <option value="night_cache">de_cache_night (Ночной Каменный Ангар)</option>
+                <option value="dust2_style">Dust II (Песочный камуфляж)</option>
+                <option value="cache">de_cache (Индустриальный камень)</option>
+                <option value="night_cache">de_cache_night (Ночной Чернобыль)</option>
             </select>
         </div>
 
@@ -98,7 +98,7 @@
         
         <button class="start-btn" onclick="startGame()">В БОЙ</button>
         <button class="sec-btn" onclick="toggleSettings(true)">Настройки</button>
-        <p style="font-size: 11px; color: #666; margin-top: 10px;">ЛКМ - Огонь | ПКМ - Зум AWP | R - Релоад | Коллизия ботов ВКЛ</p>
+        <p style="font-size: 11px; color: #666; margin-top: 10px;">Враги вооружены | Полная физика стен и коллизий ботов</p>
     </div>
 
     <div class="panel" id="settings-menu" style="display: none;">
@@ -172,31 +172,37 @@
     const PLAYER_HEIGHT = 1.8;
     const PLAYER_SPEED = 12.0; 
     const PLAYER_RADIUS = 0.6; 
-    const BOT_RADIUS = 0.55; // Радиус физического тела бота для коллизий
+    const BOT_RADIUS = 0.55; 
 
     let uiAmmo, uiReserve, uiHP, reloadMsg, menuOverlay, mainMenu, settingsMenu, gameOverMenu, killFeed, chStandard, chScope;
 
-    // ГЕНЕРАТОР ПРОЦЕДУРНЫХ ТЕКСТУР (Создаем текстуры кода на Canvas без картинок)
+    // СТАБИЛЬНЫЙ ПРОЦЕДУРНЫЙ ГЕНЕРАТОР ТЕКСТУР ДЛЯ СТЕН
     function generateWallTexture(type) {
         const canvas = document.createElement('canvas');
         canvas.width = 512; canvas.height = 512;
         const ctx = canvas.getContext('2d');
 
         if (type === 'sand') {
-            // Песочная текстура для Dust 2
-            ctx.fillStyle = '#d6b285'; ctx.fillRect(0, 0, 512, 512);
-            for (let i = 0; i < 15000; i++) {
-                ctx.fillStyle = Math.random() > 0.5 ? '#c49f72' : '#e3c298';
+            // Реалистичный песчаник Dust II с шероховатостями
+            ctx.fillStyle = '#e0be91'; ctx.fillRect(0, 0, 512, 512);
+            for (let i = 0; i < 30000; i++) {
+                ctx.fillStyle = Math.random() > 0.5 ? '#cca576' : '#ebd4b0';
                 ctx.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
             }
+            // Крупные песчаные плиты/разводы
+            ctx.strokeStyle = 'rgba(150,110,80,0.2)';
+            ctx.lineWidth = 3;
+            for(let j=0; j<4; j++) {
+                ctx.beginPath(); ctx.moveTo(0, j*128); ctx.lineTo(512, j*128); ctx.stroke();
+            }
         } else {
-            // Текстура камней/кирпичей для Cache
-            ctx.fillStyle = type === 'stone_dark' ? '#222922' : '#666e66'; 
+            // Каменная кирпичная кладка de_cache
+            ctx.fillStyle = type === 'stone_dark' ? '#252c25' : '#707870'; 
             ctx.fillRect(0, 0, 512, 512);
-            ctx.strokeStyle = type === 'stone_dark' ? '#111511' : '#444b44';
-            ctx.lineWidth = 4;
+            ctx.strokeStyle = type === 'stone_dark' ? '#141a14' : '#4b524b';
+            ctx.lineWidth = 5;
             
-            let rows = 16; let cols = 8;
+            let rows = 12; let cols = 6;
             let rh = 512 / rows; let cw = 512 / cols;
             for(let r = 0; r < rows; r++) {
                 ctx.beginPath(); ctx.moveTo(0, r*rh); ctx.lineTo(512, r*rh); ctx.stroke();
@@ -205,26 +211,20 @@
                     ctx.beginPath(); ctx.moveTo(c*cw - offset, r*rh); ctx.lineTo(c*cw - offset, (r+1)*rh); ctx.stroke();
                 }
             }
-            // Эффект грязи и сколов камня
-            for(let i=0; i<300; i++) {
-                ctx.fillStyle = 'rgba(0,0,0,0.15)';
-                ctx.fillRect(Math.random()*512, Math.random()*512, Math.random()*15+2, Math.random()*15+2);
+            for(let i=0; i<400; i++) {
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.fillRect(Math.random()*512, Math.random()*512, Math.random()*10+2, Math.random()*10+2);
             }
         }
         const texture = new THREE.CanvasTexture(canvas);
         texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(3, 2);
+        texture.repeat.set(2, 2);
         return texture;
     }
 
     function toggleSettings(show) {
-        if (show) {
-            mainMenu.style.display = 'none';
-            settingsMenu.style.display = 'block';
-        } else {
-            mainMenu.style.display = 'block';
-            settingsMenu.style.display = 'none';
-        }
+        if (show) { mainMenu.style.display = 'none'; settingsMenu.style.display = 'block'; } 
+        else { mainMenu.style.display = 'block'; settingsMenu.style.display = 'none'; }
     }
 
     function toggleZoom(forceOff = false) {
@@ -264,7 +264,7 @@
             if(scene.children[i] !== cameraHolder) scene.remove(scene.children[i]);
         }
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
         dirLight.position.set(40, 100, 20); scene.add(dirLight);
 
@@ -342,7 +342,7 @@
         let blocks = []; 
 
         if (mapType === 'dust2_style') { 
-            texType = 'sand'; floorColor = '#bfa27e'; fogColor = 0xdfbca2;
+            texType = 'sand'; floorColor = '#d1b28c'; fogColor = 0xe8ccaa;
             blocks.push({x: 25, y: 2, z: -20, w: 25, h: 4, d: 25, type: 'platform'}); 
             blocks.push({x: 25, y: 1, z: -2, w: 6, h: 2, d: 11, type: 'ramp', rotX: 0.2});
             blocks.push({x: 0, y: 3, z: -35, w: 4, h: 6, d: 30, type: 'wall'}); 
@@ -351,8 +351,8 @@
         } 
         else { 
             texType = (mapType === 'cache') ? 'stone' : 'stone_dark';
-            floorColor = mapType === 'cache' ? '#4e544e' : '#151a15';
-            fogColor = mapType === 'cache' ? '#8a948a' : '#040704';
+            floorColor = mapType === 'cache' ? '#5a615a' : '#181f18';
+            fogColor = mapType === 'cache' ? '#9fb09f' : '#050a05';
 
             blocks = [
                 {x: 0, y: 4, z: 0, w: 18, h: 8, d: 20, type: 'wall'}, 
@@ -369,18 +369,18 @@
         }
 
         scene.background = new THREE.Color(fogColor);
-        scene.fog = new THREE.FogExp2(fogColor, 0.015);
+        scene.fog = new THREE.FogExp2(fogColor, 0.012);
 
         // Создаем пол
         const floorGeo = new THREE.PlaneGeometry(300, 300);
-        const floorMat = new THREE.MeshStandardMaterial({ color: floorColor, roughness: 0.9 });
+        const floorMat = new THREE.MeshStandardMaterial({ color: floorColor, roughness: 1.0 });
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.rotation.x = -Math.PI / 2; scene.add(floor);
         platforms.push(floor);
 
-        // Генерируем текстурный материал для стен
+        // Генерация текстурного материала
         const wallTex = generateWallTexture(texType);
-        const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.7 });
+        const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8 });
 
         const boxGeo = new THREE.BoxGeometry(1, 1, 1);
         blocks.forEach(b => {
@@ -391,30 +391,32 @@
             scene.add(mesh);
 
             if (b.type === 'platform') platforms.push(mesh);
-            else obstacles.push(new THREE.Box3().setFromObject(mesh));
+            
+            // Физическая коробка для просчета коллизий игрока и ботов
+            obstacles.push(new THREE.Box3().setFromObject(mesh));
         });
     }
 
-    // Проверка столкновения игрока со стенами И с телами ботов
-    function checkPlayerCollision(nextPosition) {
-        const playerBox = new THREE.Box3(
-            new THREE.Vector3(nextPosition.x - PLAYER_RADIUS, nextPosition.y - PLAYER_HEIGHT, nextPosition.z - PLAYER_RADIUS),
-            new THREE.Vector3(nextPosition.x + PLAYER_RADIUS, nextPosition.y, nextPosition.z + PLAYER_RADIUS)
+    // Универсальная функция проверки коллизий объектов с окружением (для игрока и ботов)
+    function checkCollision(position, radius, height) {
+        const boundingBox = new THREE.Box3(
+            new THREE.Vector3(position.x - radius, position.y, position.z - radius),
+            new THREE.Vector3(position.x + radius, position.y + height, position.z + radius)
         );
-        
-        // Коллизия со стенами
         for (let i = 0; i < obstacles.length; i++) {
-            if (playerBox.intersectsBox(obstacles[i])) return true;
+            if (boundingBox.intersectsBox(obstacles[i])) return true;
         }
+        return false;
+    }
 
-        // Коллизия игрока с ботами (Блокировка прохода)
+    // Проверка коллизии Игрока с Ботами
+    function checkPlayerWithBots(nextPosition) {
+        if(checkCollision(nextPosition, PLAYER_RADIUS, PLAYER_HEIGHT)) return true;
+
         for(let i = 0; i < bots.length; i++) {
             let bot = bots[i];
             let distXZ = Math.sqrt(Math.pow(nextPosition.x - bot.position.x, 2) + Math.pow(nextPosition.z - bot.position.z, 2));
-            let distY = Math.abs(nextPosition.y - (bot.position.y + 0.9));
-            if (distXZ < (PLAYER_RADIUS + BOT_RADIUS) && distY < 1.8) {
-                return true; 
-            }
+            if (distXZ < (PLAYER_RADIUS + BOT_RADIUS)) return true; 
         }
         return false;
     }
@@ -453,7 +455,7 @@
     function spawnBots() {
         for(let i = 0; i < botCount; i++) {
             const botGroup = new THREE.Group();
-            const clothesMat = new THREE.MeshStandardMaterial({ color: mapType.includes('cache') ? 0x445544 : 0x8b4513 });
+            const clothesMat = new THREE.MeshStandardMaterial({ color: mapType.includes('cache') ? 0x3d473d : 0x735135 });
             const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdbac });
 
             const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.4), clothesMat);
@@ -462,12 +464,27 @@
             const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), skinMat);
             head.position.y = 1.75; botGroup.add(head);
 
-            const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.7, 0.24), new THREE.MeshStandardMaterial({color:0x222222}));
+            const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.7, 0.24), new THREE.MeshStandardMaterial({color:0x1c1c1c}));
             leftLeg.position.set(-0.18, 0.35, 0); botGroup.add(leftLeg);
             const rightLeg = leftLeg.clone(); rightLeg.position.x = 0.18; botGroup.add(rightLeg);
 
-            botGroup.position.set((Math.random() - 0.5) * 45, 0, (Math.random() - 0.5) * 50);
-            botGroup.userData = { health: 100, lastShot: 0, leftLeg, rightLeg, animOffset: Math.random()*5, velocityY: 0 };
+            // ДОБАВЛЕНИЕ ОРУЖИЯ В РУКИ БОТА
+            const botGun = new THREE.Group();
+            const gBody = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, 0.45), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+            const gBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.25), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+            gBarrel.rotation.x = Math.PI / 2; gBarrel.position.set(0, 0.02, -0.3);
+            botGun.add(gBody, gBarrel);
+            botGun.position.set(0.3, 1.1, -0.3); // Позиционируем автомат в руках справа
+            botGroup.add(botGun);
+
+            // Эффект выстрела для автомата бота
+            const bFlash = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0 }));
+            bFlash.position.set(0.3, 1.12, -0.45);
+            botGroup.add(bFlash);
+
+            botGroup.position.set((Math.random() - 0.5) * 40, 0, (Math.random() - 0.5) * 40);
+            botGroup.userData = { health: 100, lastShot: 0, leftLeg, rightLeg, animOffset: Math.random()*5, velocityY: 0, flashMesh: bFlash };
+            
             scene.add(botGroup);
             bots.push(botGroup);
         }
@@ -550,24 +567,22 @@
         const playerPos = cameraHolder.position;
         const time = Date.now();
 
-        // 1. Коллизия ботов МЕЖДУ СОБОЙ (чтобы они не слипались в одну точку)
+        // 1. Коллизия ботов между собой
         for (let i = 0; i < bots.length; i++) {
             for (let j = i + 1; j < bots.length; j++) {
                 let b1 = bots[i]; let b2 = bots[j];
                 let dist = b1.position.distanceTo(b2.position);
                 let minDist = BOT_RADIUS * 2;
                 if (dist < minDist) {
-                    // Расталкиваем ботов в разные стороны
                     let pushDir = new THREE.Vector3().subVectors(b1.position, b2.position).normalize();
-                    pushDir.y = 0; 
-                    let overlap = minDist - dist;
+                    pushDir.y = 0; let overlap = minDist - dist;
                     b1.position.add(pushDir.clone().multiplyScalar(overlap * 0.5));
                     b2.position.sub(pushDir.clone().multiplyScalar(overlap * 0.5));
                 }
             }
         }
 
-        // 2. Основное движение и физика падения ботов
+        // 2. Движение бота и проверка коллизий со стенами
         bots.forEach(bot => {
             let isMoving = false;
             const dist = bot.position.distanceTo(playerPos);
@@ -582,15 +597,20 @@
             const raycasterBot = new THREE.Raycaster(new THREE.Vector3(bot.position.x, bot.position.y + 0.5, bot.position.z), new THREE.Vector3(0, -1, 0));
             const botIntersects = raycasterBot.intersectObjects(platforms);
             if (botIntersects.length > 0) botGround = (bot.position.y + 0.5) - botIntersects[0].distance;
-
             if (bot.position.y <= botGround) { bot.position.y = botGround; bot.userData.velocityY = 0; }
 
-            // Преследовать игрока, если не уперлись слишком близко
-            if (dist > 3.5 && bot.position.y <= botGround + 0.05) {
+            // Движение вперед с ПРОВЕРКОЙ КОЛЛИЗИЙ СО СТЕНАМИ
+            if (dist > 4.0 && bot.position.y <= botGround + 0.05) {
                 const dir = new THREE.Vector3().subVectors(playerPos, bot.position).normalize();
                 dir.y = 0; 
-                bot.position.add(dir.multiplyScalar(speed * delta));
-                isMoving = true;
+                
+                const nextBotPos = bot.position.clone().add(dir.clone().multiplyScalar(speed * delta));
+                
+                // Бот делает шаг только если впереди нет стены!
+                if (!checkCollision(nextBotPos, BOT_RADIUS, 1.8)) {
+                    bot.position.copy(nextBotPos);
+                    isMoving = true;
+                }
             }
 
             if (isMoving) {
@@ -598,8 +618,16 @@
                 bot.userData.leftLeg.rotation.x = wave * 0.6; bot.userData.rightLeg.rotation.x = -wave * 0.6;
             }
 
-            if(dist < 16 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 800 : 1600)) {
-                playerHealth -= (botDifficulty === 'hard' ? 14 : 7); updateHUD();
+            // Стрельба бота из его оружия
+            if(dist < 18 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 700 : 1500)) {
+                playerHealth -= (botDifficulty === 'hard' ? 12 : 6); updateHUD();
+                
+                // Вспышка выстрела на оружии бота
+                if(bot.userData.flashMesh) {
+                    bot.userData.flashMesh.material.opacity = 1;
+                    setTimeout(() => { if(bot.userData.flashMesh) bot.userData.flashMesh.material.opacity = 0; }, 50);
+                }
+
                 if(playerHealth <= 0) endGame(false);
                 bot.userData.lastShot = time;
             }
@@ -648,13 +676,11 @@
 
             const oldPos = cameraHolder.position.clone();
             
-            // Смещаемся по X и проверяем коллизию (со стенами + ботами)
             cameraHolder.position.x += moveVector.x;
-            if (checkPlayerCollision(cameraHolder.position)) cameraHolder.position.x = oldPos.x;
+            if (checkPlayerWithBots(cameraHolder.position)) cameraHolder.position.x = oldPos.x;
 
-            // Смещаемся по Z и проверяем коллизию (со стенами + ботами)
             cameraHolder.position.z += moveVector.z;
-            if (checkPlayerCollision(cameraHolder.position)) cameraHolder.position.z = oldPos.z;
+            if (checkPlayerWithBots(cameraHolder.position)) cameraHolder.position.z = oldPos.z;
 
             cameraHolder.position.y += (velocity.y * delta);
 
