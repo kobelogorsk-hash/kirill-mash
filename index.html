@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Ultimate Physics & Bot Weapons</title>
+    <title>Browser CS Prototype - Recoil & Headshots</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 5; }
@@ -38,7 +38,7 @@
         
         #reload-msg { position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%); color: #ff4444; font-size: 22px; font-weight: bold; display: none; text-shadow: 2px 2px 4px black; letter-spacing: 1px; }
         #kill-feed { position: absolute; top: 20px; right: 20px; text-align: right; color: white; text-shadow: 1px 1px 2px black; font-size: 16px; font-weight: bold; }
-        .feed-item { margin-bottom: 5px; opacity: 1; transition: opacity 2s; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 3px; border-right: 4px solid #0f0; }
+        .feed-item { margin-bottom: 5px; opacity: 1; transition: opacity 2s; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 3px; border-right: 4px solid #ff3333; }
     </style>
 </head>
 <body>
@@ -98,7 +98,7 @@
         
         <button class="start-btn" onclick="startGame()">В БОЙ</button>
         <button class="sec-btn" onclick="toggleSettings(true)">Настройки</button>
-        <p style="font-size: 11px; color: #666; margin-top: 10px;">Враги вооружены | Полная физика стен и коллизий ботов</p>
+        <p style="font-size: 11px; color: #aaa; margin-top: 10px;">Ваншоты в голову добавлены! Контролируй отдачу оружия.</p>
     </div>
 
     <div class="panel" id="settings-menu" style="display: none;">
@@ -155,17 +155,22 @@
     let gunMesh, muzzleFlash;
     let gunBasePos = new THREE.Vector3(0.24, -0.24, -0.55); 
     let currentGunPos = new THREE.Vector3().copy(gunBasePos);
-    let recoilY = 0; 
+    
+    // ПЕРЕМЕННЫЕ ДЛЯ СИСТЕМЫ ОТДАЧИ
+    let recoilPitch = 0; // На сколько камеру подкинуло вверх
+    let recoilYaw = 0;   // Смещение камеры влево/вправо при зажиме
+    let continuousShots = 0; // Количество выстрелов в одной очереди
     
     let botDifficulty = 'medium', mapType = 'dust2_style', weaponSkin = 'default', botCount = 6;
     let currentWeapon = 'ak47';
     let isMouseDown = false; 
     let isScoped = false; 
 
+    // Параметры оружия с учетом новой отдачи
     const WEAPON_CONFIGS = {
-        ak47: { name: 'AK-47', maxAmmo: 30, reserve: 90, damage: 34, fireRate: 130, recoil: 0.07, color: 0x4a2f13, auto: true },
-        awp:  { name: 'AWP Sniper', maxAmmo: 5, reserve: 20, damage: 115, fireRate: 1300, recoil: 0.3, color: 0x1b4d22, auto: false },
-        p90:  { name: 'P90 SMG', maxAmmo: 50, reserve: 150, damage: 19, fireRate: 65, recoil: 0.025, color: 0x333333, auto: true }
+        ak47: { name: 'AK-47', maxAmmo: 30, reserve: 90, damage: 34, fireRate: 130, recoilUp: 0.04, recoilSide: 0.02, color: 0x4a2f13, auto: true },
+        awp:  { name: 'AWP Sniper', maxAmmo: 5, reserve: 20, damage: 115, fireRate: 1300, recoilUp: 0.25, recoilSide: 0.0, color: 0x1b4d22, auto: false },
+        p90:  { name: 'P90 SMG', maxAmmo: 50, reserve: 150, damage: 19, fireRate: 65, recoilUp: 0.015, recoilSide: 0.012, color: 0x333333, auto: true }
     };
 
     let lastFireTime = 0;
@@ -176,45 +181,29 @@
 
     let uiAmmo, uiReserve, uiHP, reloadMsg, menuOverlay, mainMenu, settingsMenu, gameOverMenu, killFeed, chStandard, chScope;
 
-    // СТАБИЛЬНЫЙ ПРОЦЕДУРНЫЙ ГЕНЕРАТОР ТЕКСТУР ДЛЯ СТЕН
     function generateWallTexture(type) {
         const canvas = document.createElement('canvas');
         canvas.width = 512; canvas.height = 512;
         const ctx = canvas.getContext('2d');
 
         if (type === 'sand') {
-            // Реалистичный песчаник Dust II с шероховатостями
             ctx.fillStyle = '#e0be91'; ctx.fillRect(0, 0, 512, 512);
             for (let i = 0; i < 30000; i++) {
                 ctx.fillStyle = Math.random() > 0.5 ? '#cca576' : '#ebd4b0';
                 ctx.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
             }
-            // Крупные песчаные плиты/разводы
-            ctx.strokeStyle = 'rgba(150,110,80,0.2)';
-            ctx.lineWidth = 3;
-            for(let j=0; j<4; j++) {
-                ctx.beginPath(); ctx.moveTo(0, j*128); ctx.lineTo(512, j*128); ctx.stroke();
-            }
+            ctx.strokeStyle = 'rgba(150,110,80,0.2)'; ctx.lineWidth = 3;
+            for(let j=0; j<4; j++) { ctx.beginPath(); ctx.moveTo(0, j*128); ctx.lineTo(512, j*128); ctx.stroke(); }
         } else {
-            // Каменная кирпичная кладка de_cache
-            ctx.fillStyle = type === 'stone_dark' ? '#252c25' : '#707870'; 
-            ctx.fillRect(0, 0, 512, 512);
-            ctx.strokeStyle = type === 'stone_dark' ? '#141a14' : '#4b524b';
-            ctx.lineWidth = 5;
-            
-            let rows = 12; let cols = 6;
-            let rh = 512 / rows; let cw = 512 / cols;
+            ctx.fillStyle = type === 'stone_dark' ? '#252c25' : '#707870'; ctx.fillRect(0, 0, 512, 512);
+            ctx.strokeStyle = type === 'stone_dark' ? '#141a14' : '#4b524b'; ctx.lineWidth = 5;
+            let rows = 12; let cols = 6; let rh = 512 / rows; let cw = 512 / cols;
             for(let r = 0; r < rows; r++) {
                 ctx.beginPath(); ctx.moveTo(0, r*rh); ctx.lineTo(512, r*rh); ctx.stroke();
                 let offset = (r % 2) * (cw / 2);
-                for(let c = 0; c <= cols + 1; c++) {
-                    ctx.beginPath(); ctx.moveTo(c*cw - offset, r*rh); ctx.lineTo(c*cw - offset, (r+1)*rh); ctx.stroke();
-                }
+                for(let c = 0; c <= cols + 1; c++) { ctx.beginPath(); ctx.moveTo(c*cw - offset, r*rh); ctx.lineTo(c*cw - offset, (r+1)*rh); ctx.stroke(); }
             }
-            for(let i=0; i<400; i++) {
-                ctx.fillStyle = 'rgba(0,0,0,0.2)';
-                ctx.fillRect(Math.random()*512, Math.random()*512, Math.random()*10+2, Math.random()*10+2);
-            }
+            for(let i=0; i<400; i++) { ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(Math.random()*512, Math.random()*512, Math.random()*10+2, Math.random()*10+2); }
         }
         const texture = new THREE.CanvasTexture(canvas);
         texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
@@ -256,7 +245,8 @@
         maxAmmo = wng.maxAmmo; currentAmmo = maxAmmo; reserveAmmo = wng.reserve;
         document.getElementById('weapon-display').innerText = wng.name;
 
-        playerHealth = 100; isReloading = false; toggleZoom(true); recoilY = 0;
+        playerHealth = 100; isReloading = false; toggleZoom(true); 
+        recoilPitch = 0; recoilYaw = 0; continuousShots = 0;
         bots = []; obstacles = []; platforms = [];
         updateHUD();
         
@@ -327,7 +317,7 @@
             if(e.button === 0) { isMouseDown = true; if(!WEAPON_CONFIGS[currentWeapon].auto) shoot(); } 
             else if(e.button === 2) toggleZoom();
         });
-        document.addEventListener('mouseup', (e) => { if(e.button === 0) isMouseDown = false; });
+        document.addEventListener('mouseup', (e) => { if(e.button === 0) { isMouseDown = false; continuousShots = 0; } });
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setPixelRatio(window.devicePixelRatio); renderer.setSize(window.innerWidth, window.innerHeight);
@@ -371,14 +361,12 @@
         scene.background = new THREE.Color(fogColor);
         scene.fog = new THREE.FogExp2(fogColor, 0.012);
 
-        // Создаем пол
         const floorGeo = new THREE.PlaneGeometry(300, 300);
         const floorMat = new THREE.MeshStandardMaterial({ color: floorColor, roughness: 1.0 });
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.rotation.x = -Math.PI / 2; scene.add(floor);
         platforms.push(floor);
 
-        // Генерация текстурного материала
         const wallTex = generateWallTexture(texType);
         const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8 });
 
@@ -389,15 +377,11 @@
             mesh.scale.set(b.w, b.h, b.d);
             if (b.rotX) mesh.rotation.x = b.rotX;
             scene.add(mesh);
-
             if (b.type === 'platform') platforms.push(mesh);
-            
-            // Физическая коробка для просчета коллизий игрока и ботов
             obstacles.push(new THREE.Box3().setFromObject(mesh));
         });
     }
 
-    // Универсальная функция проверки коллизий объектов с окружением (для игрока и ботов)
     function checkCollision(position, radius, height) {
         const boundingBox = new THREE.Box3(
             new THREE.Vector3(position.x - radius, position.y, position.z - radius),
@@ -409,10 +393,8 @@
         return false;
     }
 
-    // Проверка коллизии Игрока с Ботами
     function checkPlayerWithBots(nextPosition) {
         if(checkCollision(nextPosition, PLAYER_RADIUS, PLAYER_HEIGHT)) return true;
-
         for(let i = 0; i < bots.length; i++) {
             let bot = bots[i];
             let distXZ = Math.sqrt(Math.pow(nextPosition.x - bot.position.x, 2) + Math.pow(nextPosition.z - bot.position.z, 2));
@@ -461,29 +443,30 @@
             const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.4), clothesMat);
             torso.position.y = 1.15; botGroup.add(torso);
 
+            // ГОЛОВА БОТА (ХИТБОКС ДЛЯ ВАНШОТА)
             const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), skinMat);
-            head.position.y = 1.75; botGroup.add(head);
+            head.position.y = 1.75; 
+            head.name = "bot_head"; // Пометка для проверки при попадании луча
+            botGroup.add(head);
 
             const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.7, 0.24), new THREE.MeshStandardMaterial({color:0x1c1c1c}));
             leftLeg.position.set(-0.18, 0.35, 0); botGroup.add(leftLeg);
             const rightLeg = leftLeg.clone(); rightLeg.position.x = 0.18; botGroup.add(rightLeg);
 
-            // ДОБАВЛЕНИЕ ОРУЖИЯ В РУКИ БОТА
             const botGun = new THREE.Group();
             const gBody = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.09, 0.45), new THREE.MeshStandardMaterial({ color: 0x222222 }));
             const gBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.25), new THREE.MeshStandardMaterial({ color: 0x111111 }));
             gBarrel.rotation.x = Math.PI / 2; gBarrel.position.set(0, 0.02, -0.3);
             botGun.add(gBody, gBarrel);
-            botGun.position.set(0.3, 1.1, -0.3); // Позиционируем автомат в руках справа
+            botGun.position.set(0.3, 1.1, -0.3);
             botGroup.add(botGun);
 
-            // Эффект выстрела для автомата бота
             const bFlash = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0 }));
             bFlash.position.set(0.3, 1.12, -0.45);
             botGroup.add(bFlash);
 
             botGroup.position.set((Math.random() - 0.5) * 40, 0, (Math.random() - 0.5) * 40);
-            botGroup.userData = { health: 100, lastShot: 0, leftLeg, rightLeg, animOffset: Math.random()*5, velocityY: 0, flashMesh: bFlash };
+            botGroup.userData = { health: 100, lastShot: 0, leftLeg, rightLeg, animOffset: Math.random()*5, velocityY: 0, flashMesh: bFlash, headMesh: head };
             
             scene.add(botGroup);
             bots.push(botGroup);
@@ -502,33 +485,55 @@
 
         if(currentWeapon === 'awp' && isScoped) toggleZoom(true);
 
-        recoilY += conf.recoil;
+        // УВЕЛИЧЕНИЕ ОТДАЧИ С КАЖДЫМ ВЫСТРЕЛОМ (СПРЕЙ)
+        continuousShots++;
+        let currentRecoilUp = conf.recoilUp * (1 + continuousShots * 0.15);
+        let currentRecoilSide = (Math.random() - 0.5) * conf.recoilSide * (continuousShots * 0.3);
+        
+        recoilPitch += currentRecoilUp;
+        recoilYaw += currentRecoilSide;
+
+        // Эффект подергивания оружия в руках
         if(gunMesh && !isScoped) {
-            gunMesh.position.z = gunBasePos.z + conf.recoil * 1.5; 
-            gunMesh.position.y = gunBasePos.y + (conf.recoil * 0.4); 
-            gunMesh.rotation.x = -conf.recoil * 2; 
+            gunMesh.position.z = gunBasePos.z + currentRecoilUp * 1.2; 
+            gunMesh.position.y = gunBasePos.y + (currentRecoilUp * 0.3); 
+            gunMesh.rotation.x = -currentRecoilUp * 1.5; 
         }
         
         if(muzzleFlash && !isScoped) { muzzleFlash.material.opacity = 1; setTimeout(() => muzzleFlash.material.opacity = 0, 40); }
 
+        // Расчет направления пули с учетом отдачи
         const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        let targetScreenX = 0;
+        let targetScreenY = 0;
 
-        if (!isScoped && currentWeapon !== 'awp') {
-            raycaster.ray.direction.x += (Math.random() - 0.5) * 0.03;
-            raycaster.ray.direction.y += (Math.random() - 0.5) * 0.03;
+        // Если зажим длинный — пули летят выше перекрестия прицела
+        if (!isScoped) {
+            targetScreenY += (continuousShots * 0.012); 
+            targetScreenX += (Math.random() - 0.5) * (continuousShots * 0.01);
         }
+
+        raycaster.setFromCamera(new THREE.Vector2(targetScreenX, targetScreenY), camera);
 
         const intersects = raycaster.intersectObjects(scene.children, true);
         createBulletTrail(raycaster);
 
         for (let i = 0; i < intersects.length; i++) {
-            let hitObj = intersects[i].object;
-            while (hitObj.parent && !bots.includes(hitObj)) hitObj = hitObj.parent;
+            let hitMesh = intersects[i].object;
+            let isHeadshot = (hitMesh.name === "bot_head"); // Проверяем, попали ли в голову
 
-            if (bots.includes(hitObj)) {
-                hitObj.userData.health -= conf.damage;
-                if(hitObj.userData.health <= 0) killBot(hitObj);
+            // Ищем корень бота, чтобы нанести урон
+            let hitBot = hitMesh;
+            while (hitBot.parent && !bots.includes(hitBot)) hitBot = hitBot.parent;
+
+            if (bots.includes(hitBot)) {
+                if (isHeadshot) {
+                    hitBot.userData.health = 0; // ВАНШОТ В ГОЛОВУ!
+                    killBot(hitBot, true);
+                } else {
+                    hitBot.userData.health -= conf.damage; // Попадание в тело
+                    if(hitBot.userData.health <= 0) killBot(hitBot, false);
+                }
                 break;
             }
         }
@@ -554,10 +559,18 @@
         }, 1400);
     }
 
-    function killBot(bot) {
+    function killBot(bot, headshot) {
         scene.remove(bot); bots = bots.filter(b => b !== bot);
         const feedItem = document.createElement('div'); feedItem.className = 'feed-item';
-        feedItem.innerHTML = `Минус Бот [${WEAPON_CONFIGS[currentWeapon].name}] 🎯`;
+        
+        if (headshot) {
+            feedItem.innerHTML = `💥 Минус Бот [${WEAPON_CONFIGS[currentWeapon].name}] [Headshot] 💀`;
+            feedItem.style.borderRight = "4px solid #ffcc00";
+        } else {
+            feedItem.innerHTML = `Минус Бот [${WEAPON_CONFIGS[currentWeapon].name}] 🎯`;
+            feedItem.style.borderRight = "4px solid #ff3333";
+        }
+        
         killFeed.prepend(feedItem); setTimeout(() => feedItem.remove(), 2500);
         if(bots.length === 0) endGame(true);
     }
@@ -567,7 +580,6 @@
         const playerPos = cameraHolder.position;
         const time = Date.now();
 
-        // 1. Коллизия ботов между собой
         for (let i = 0; i < bots.length; i++) {
             for (let j = i + 1; j < bots.length; j++) {
                 let b1 = bots[i]; let b2 = bots[j];
@@ -582,7 +594,6 @@
             }
         }
 
-        // 2. Движение бота и проверка коллизий со стенами
         bots.forEach(bot => {
             let isMoving = false;
             const dist = bot.position.distanceTo(playerPos);
@@ -599,14 +610,10 @@
             if (botIntersects.length > 0) botGround = (bot.position.y + 0.5) - botIntersects[0].distance;
             if (bot.position.y <= botGround) { bot.position.y = botGround; bot.userData.velocityY = 0; }
 
-            // Движение вперед с ПРОВЕРКОЙ КОЛЛИЗИЙ СО СТЕНАМИ
             if (dist > 4.0 && bot.position.y <= botGround + 0.05) {
                 const dir = new THREE.Vector3().subVectors(playerPos, bot.position).normalize();
                 dir.y = 0; 
-                
                 const nextBotPos = bot.position.clone().add(dir.clone().multiplyScalar(speed * delta));
-                
-                // Бот делает шаг только если впереди нет стены!
                 if (!checkCollision(nextBotPos, BOT_RADIUS, 1.8)) {
                     bot.position.copy(nextBotPos);
                     isMoving = true;
@@ -618,16 +625,12 @@
                 bot.userData.leftLeg.rotation.x = wave * 0.6; bot.userData.rightLeg.rotation.x = -wave * 0.6;
             }
 
-            // Стрельба бота из его оружия
             if(dist < 18 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 700 : 1500)) {
                 playerHealth -= (botDifficulty === 'hard' ? 12 : 6); updateHUD();
-                
-                // Вспышка выстрела на оружии бота
                 if(bot.userData.flashMesh) {
                     bot.userData.flashMesh.material.opacity = 1;
                     setTimeout(() => { if(bot.userData.flashMesh) bot.userData.flashMesh.material.opacity = 0; }, 50);
                 }
-
                 if(playerHealth <= 0) endGame(false);
                 bot.userData.lastShot = time;
             }
@@ -659,6 +662,24 @@
         if (controls && controls.isLocked && isGameActive && cameraHolder) {
             
             if(isMouseDown && WEAPON_CONFIGS[currentWeapon].auto) shoot();
+
+            // СГЛАЖИВАНИЕ И ВОЗВРАТ КАМЕРЫ ОТ ОТДАЧИ (Рекавери)
+            if (recoilPitch > 0) {
+                let pitchReduce = delta * 0.3; // Скорость затухания отдачи
+                camera.rotation.x += pitchReduce; // Возвращаем взгляд вниз
+                recoilPitch -= pitchReduce;
+            }
+            if (Math.abs(recoilYaw) > 0) {
+                let yawReduce = delta * 0.2 * Math.sign(recoilYaw);
+                camera.rotation.y -= yawReduce;
+                recoilYaw -= yawReduce;
+            }
+
+            // Применяем текущее смещение от выстрела к камере
+            if (recoilPitch > 0.001) {
+                camera.rotation.x -= recoilPitch * 0.1; // Подкидывает вверх
+                camera.rotation.y += recoilYaw * 0.05;  // Трясет в стороны
+            }
 
             velocity.y -= 28.0 * delta; 
 
