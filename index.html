@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Skin Update</title>
+    <title>Browser CS Prototype - Camera Fixed</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 5; }
@@ -159,7 +159,9 @@
     let gunBasePos = new THREE.Vector3(0.24, -0.24, -0.55); 
     let currentGunPos = new THREE.Vector3().copy(gunBasePos);
     
-    let recoilActivePitch = 0; 
+    // Переменные для изолированного смещения отдачи (без конфликта с PointerLock)
+    let recoilPitch = 0;
+    let recoilYaw = 0;
     let continuousShots = 0; 
     
     let botDifficulty = 'medium', mapType = 'dust2_style', weaponSkin = 'default', botCount = 6;
@@ -168,9 +170,9 @@
     let isScoped = false; 
 
     const WEAPON_CONFIGS = {
-        ak47: { name: 'AK-47', maxAmmo: 30, reserve: 90, damage: 34, fireRate: 130, recoilUp: 0.006, recoilSide: 0.003, color: 0x4a2f13, auto: true },
-        awp:  { name: 'AWP Sniper', maxAmmo: 5, reserve: 20, damage: 115, fireRate: 1300, recoilUp: 0.06, recoilSide: 0.0, color: 0x1b4d22, auto: false },
-        p90:  { name: 'P90 SMG', maxAmmo: 50, reserve: 150, damage: 19, fireRate: 65, recoilUp: 0.002, recoilSide: 0.0015, color: 0x333333, auto: true }
+        ak47: { name: 'AK-47', maxAmmo: 30, reserve: 90, damage: 34, fireRate: 130, recoilUp: 0.007, recoilSide: 0.004, color: 0x4a2f13, auto: true },
+        awp:  { name: 'AWP Sniper', maxAmmo: 5, reserve: 20, damage: 115, fireRate: 1300, recoilUp: 0.07, recoilSide: 0.0, color: 0x1b4d22, auto: false },
+        p90:  { name: 'P90 SMG', maxAmmo: 50, reserve: 150, damage: 19, fireRate: 65, recoilUp: 0.003, recoilSide: 0.002, color: 0x333333, auto: true }
     };
 
     let lastFireTime = 0;
@@ -217,7 +219,6 @@
         return texture;
     }
 
-    // Динамический генератор скинов через Canvas HTML5
     function generateWeaponTexture(skinType, baseColorHex) {
         const canvas = document.createElement('canvas');
         canvas.width = 256; canvas.height = 256;
@@ -296,7 +297,7 @@
         document.getElementById('weapon-display').innerText = wng.name;
 
         playerHealth = 100; isReloading = false; toggleZoom(true); 
-        recoilActivePitch = 0; continuousShots = 0; isCrouching = false; currentPlayerHeight = STAND_HEIGHT;
+        recoilPitch = 0; recoilYaw = 0; continuousShots = 0; isCrouching = false; currentPlayerHeight = STAND_HEIGHT;
         bots = []; obstacles = []; platforms = [];
         updateHUD();
         
@@ -313,6 +314,7 @@
         createWeaponModel();
         
         if(cameraHolder) cameraHolder.position.set(5, currentPlayerHeight, 25);
+        camera.rotation.set(0,0,0); 
         velocity.set(0, 0, 0);
         
         controls.lock();
@@ -329,9 +331,13 @@
 
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        cameraHolder = new THREE.Group(); cameraHolder.add(camera);
-        cameraHolder.position.set(5, STAND_HEIGHT, 25); scene.add(cameraHolder);
         
+        cameraHolder = new THREE.Group(); 
+        cameraHolder.add(camera);
+        cameraHolder.position.set(5, STAND_HEIGHT, 25); 
+        scene.add(cameraHolder);
+        
+        // Передаем PointerLockControls управление самой камерой (для мыши), а позицию двигаем через Holder
         controls = new THREE.PointerLockControls(camera, document.body);
         
         controls.addEventListener('lock', () => { if(!isGameActive) startGame(); else menuOverlay.style.display = 'none'; });
@@ -576,10 +582,9 @@
         let currentRecoilUp = (conf.recoilUp * (1 + factor * 0.2)) * crouchModifier;
         let currentRecoilSide = ((Math.random() - 0.5) * conf.recoilSide * (factor * 0.2)) * crouchModifier;
         
-        camera.rotation.x += currentRecoilUp;
-        camera.rotation.y += currentRecoilSide;
-        
-        recoilActivePitch += currentRecoilUp;
+        // Встряхиваем отдачу безопасным способом, не конфликтующим напрямую с PointerLock движением
+        recoilPitch += currentRecoilUp;
+        recoilYaw += currentRecoilSide;
 
         if(gunMesh && !isScoped) {
             gunMesh.position.z = gunBasePos.z + currentRecoilUp * 0.8; 
@@ -756,11 +761,16 @@
             
             if(isMouseDown && WEAPON_CONFIGS[currentWeapon].auto) shoot();
 
-            if (!isMouseDown && recoilActivePitch > 0) {
-                let recovery = delta * 0.15; 
-                camera.rotation.x -= recovery;
-                recoilActivePitch -= recovery;
-                if(recoilActivePitch < 0) recoilActivePitch = 0;
+            // Плавное затухание отдачи и её компенсация без конфликтов управления мышью
+            if (recoilPitch > 0) {
+                let recovery = delta * 0.2; 
+                camera.rotation.x += recoilPitch * 0.1; // Симулируем подброс
+                recoilPitch -= recovery;
+                if(recoilPitch < 0) recoilPitch = 0;
+            }
+            if (Math.abs(recoilYaw) > 0) {
+                camera.rotation.y += recoilYaw * 0.1;
+                recoilYaw = THREE.MathUtils.lerp(recoilYaw, 0, delta * 15);
             }
 
             velocity.y -= 28.0 * delta; 
@@ -799,8 +809,9 @@
             }
 
             let targetHeight = isCrouching ? CROUCH_HEIGHT : STAND_HEIGHT;
-            currentPlayerHeight = THREE.MathUtils.lerp(currentPlayerHeight, targetHeight, delta * 10);
+            currentPlayerHeight = THREE.MathUtils.lerp(currentPlayerHeight, targetHeight, delta * 12);
 
+            // Фиксация камеры на правильной высоте относительно земли без тряски
             if (cameraHolder.position.y <= currentGround + currentPlayerHeight) {
                 velocity.y = 0; 
                 cameraHolder.position.y = currentGround + currentPlayerHeight; 
