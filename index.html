@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Fixed Recoil</title>
+    <title>Browser CS Prototype - Crouch Added</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 5; }
@@ -98,7 +98,7 @@
         
         <button class="start-btn" onclick="startGame()">В БОЙ</button>
         <button class="sec-btn" onclick="toggleSettings(true)">Настройки</button>
-        <p style="font-size: 11px; color: #aaa; margin-top: 10px;">Баг с тряской убран. Отдача оптимизирована!</p>
+        <p style="font-size: 11px; color: #aaa; margin-top: 10px;">Зажимай Left Ctrl, чтобы присесть и стрелять точнее!</p>
     </div>
 
     <div class="panel" id="settings-menu" style="display: none;">
@@ -140,6 +140,7 @@
     let camera, scene, renderer, controls, cameraHolder;
     let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
     let canJump = false;
+    let isCrouching = false; // Состояние приседания
     let prevTime = performance.now();
     const velocity = new THREE.Vector3();
     
@@ -156,8 +157,7 @@
     let gunBasePos = new THREE.Vector3(0.24, -0.24, -0.55); 
     let currentGunPos = new THREE.Vector3().copy(gunBasePos);
     
-    // ОПТИМИЗИРОВАННЫЕ ПЕРЕМЕННЫЕ ОТДАЧИ
-    let recoilActivePitch = 0; // Накопленное смещение вверх
+    let recoilActivePitch = 0; 
     let continuousShots = 0; 
     
     let botDifficulty = 'medium', mapType = 'dust2_style', weaponSkin = 'default', botCount = 6;
@@ -165,7 +165,6 @@
     let isMouseDown = false; 
     let isScoped = false; 
 
-    // Настройки уменьшенной, комфортной отдачи
     const WEAPON_CONFIGS = {
         ak47: { name: 'AK-47', maxAmmo: 30, reserve: 90, damage: 34, fireRate: 130, recoilUp: 0.006, recoilSide: 0.003, color: 0x4a2f13, auto: true },
         awp:  { name: 'AWP Sniper', maxAmmo: 5, reserve: 20, damage: 115, fireRate: 1300, recoilUp: 0.06, recoilSide: 0.0, color: 0x1b4d22, auto: false },
@@ -173,8 +172,15 @@
     };
 
     let lastFireTime = 0;
-    const PLAYER_HEIGHT = 1.8;
-    const PLAYER_SPEED = 12.0; 
+    
+    // Параметры высоты игрока
+    const STAND_HEIGHT = 1.8;
+    const CROUCH_HEIGHT = 1.0;
+    let currentPlayerHeight = STAND_HEIGHT;
+
+    const PLAYER_SPEED_STAND = 12.0; 
+    const PLAYER_SPEED_CROUCH = 5.0; // Медленное перемещение в приседе
+
     const PLAYER_RADIUS = 0.6; 
     const BOT_RADIUS = 0.55; 
 
@@ -245,7 +251,7 @@
         document.getElementById('weapon-display').innerText = wng.name;
 
         playerHealth = 100; isReloading = false; toggleZoom(true); 
-        recoilActivePitch = 0; continuousShots = 0;
+        recoilActivePitch = 0; continuousShots = 0; isCrouching = false; currentPlayerHeight = STAND_HEIGHT;
         bots = []; obstacles = []; platforms = [];
         updateHUD();
         
@@ -261,7 +267,7 @@
         spawnBots();
         createWeaponModel();
         
-        if(cameraHolder) cameraHolder.position.set(5, PLAYER_HEIGHT, 25);
+        if(cameraHolder) cameraHolder.position.set(5, currentPlayerHeight, 25);
         velocity.set(0, 0, 0);
         
         controls.lock();
@@ -279,7 +285,7 @@
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         cameraHolder = new THREE.Group(); cameraHolder.add(camera);
-        cameraHolder.position.set(5, PLAYER_HEIGHT, 25); scene.add(cameraHolder);
+        cameraHolder.position.set(5, STAND_HEIGHT, 25); scene.add(cameraHolder);
         
         controls = new THREE.PointerLockControls(camera, document.body);
         
@@ -297,8 +303,9 @@
                 case 'KeyA': moveLeft = true; break;
                 case 'KeyS': moveBackward = true; break;
                 case 'KeyD': moveRight = true; break;
-                case 'Space': if (canJump) { velocity.y += 10; canJump = false; } break;
+                case 'Space': if (canJump && !isCrouching) { velocity.y += 10; canJump = false; } break;
                 case 'KeyR': reloadWeapon(); break;
+                case 'ControlLeft': isCrouching = true; break; // Сесть
             }
         });
 
@@ -308,6 +315,7 @@
                 case 'KeyA': moveLeft = false; break;
                 case 'KeyS': moveBackward = false; break;
                 case 'KeyD': moveRight = false; break;
+                case 'ControlLeft': isCrouching = false; break; // Встать
             }
         });
 
@@ -393,7 +401,7 @@
     }
 
     function checkPlayerWithBots(nextPosition) {
-        if(checkCollision(nextPosition, PLAYER_RADIUS, PLAYER_HEIGHT)) return true;
+        if(checkCollision(nextPosition, PLAYER_RADIUS, currentPlayerHeight)) return true;
         for(let i = 0; i < bots.length; i++) {
             let bot = bots[i];
             let distXZ = Math.sqrt(Math.pow(nextPosition.x - bot.position.x, 2) + Math.pow(nextPosition.z - bot.position.z, 2));
@@ -485,16 +493,16 @@
 
         continuousShots++;
         
-        // СЛАБАЯ, КОМФОРТНАЯ ОТДАЧА С ОГРАНИЧЕНИЕМ (Срезаем безумный зажим)
+        // Модификатор точности: в приседе отдача уменьшается в 1.8 раза
+        let crouchModifier = isCrouching ? 0.55 : 1.0;
         let factor = Math.min(continuousShots, 10); 
-        let currentRecoilUp = conf.recoilUp * (1 + factor * 0.2);
-        let currentRecoilSide = (Math.random() - 0.5) * conf.recoilSide * (factor * 0.2);
         
-        // Импульс отдачи применяется ТОЛЬКО в момент выстрела напрямую к камере
+        let currentRecoilUp = (conf.recoilUp * (1 + factor * 0.2)) * crouchModifier;
+        let currentRecoilSide = ((Math.random() - 0.5) * conf.recoilSide * (factor * 0.2)) * crouchModifier;
+        
         camera.rotation.x += currentRecoilUp;
         camera.rotation.y += currentRecoilSide;
         
-        // Логируем для возврата
         recoilActivePitch += currentRecoilUp;
 
         if(gunMesh && !isScoped) {
@@ -509,10 +517,9 @@
         let targetScreenX = 0;
         let targetScreenY = 0;
 
-        // Небольшое смещение пуль от спрея на экране
         if (!isScoped) {
-            targetScreenY += (factor * 0.005); 
-            targetScreenX += (Math.random() - 0.5) * (factor * 0.004);
+            targetScreenY += (factor * 0.005) * crouchModifier; 
+            targetScreenX += (Math.random() - 0.5) * (factor * 0.004) * crouchModifier;
         }
 
         raycaster.setFromCamera(new THREE.Vector2(targetScreenX, targetScreenY), camera);
@@ -664,9 +671,8 @@
             
             if(isMouseDown && WEAPON_CONFIGS[currentWeapon].auto) shoot();
 
-            // ПЛАВНЫЙ И ЧИСТЫЙ ВОЗВРАТ КАМЕРЫ (Только когда НЕ стреляем!)
             if (!isMouseDown && recoilActivePitch > 0) {
-                let recovery = delta * 0.15; // Скорость возврата прицела вниз
+                let recovery = delta * 0.15; 
                 camera.rotation.x -= recovery;
                 recoilActivePitch -= recovery;
                 if(recoilActivePitch < 0) recoilActivePitch = 0;
@@ -684,7 +690,11 @@
             if (moveBackward) moveVector.sub(frontVector);
             if (moveRight) moveVector.add(sideVector);
             if (moveLeft) moveVector.sub(sideVector);
-            moveVector.normalize().multiplyScalar(PLAYER_SPEED * delta);
+            moveVector.normalize();
+            
+            // Динамический расчет скорости: в приседе двигаемся медленнее
+            let currentMoveSpeed = isCrouching ? PLAYER_SPEED_CROUCH : PLAYER_SPEED_STAND;
+            moveVector.multiplyScalar(currentMoveSpeed * delta);
 
             const oldPos = cameraHolder.position.clone();
             
@@ -701,8 +711,14 @@
             const platformIntersects = raycasterDown.intersectObjects(platforms);
             if (platformIntersects.length > 0) currentGround = cameraHolder.position.y - platformIntersects[0].distance;
 
-            if (cameraHolder.position.y <= currentGround + PLAYER_HEIGHT) {
-                velocity.y = 0; cameraHolder.position.y = currentGround + PLAYER_HEIGHT; canJump = true;
+            // ПЛАВНАЯ СМЕНА ВЫСОТЫ КАМЕРЫ ПРИ ПРИСЕДАНИИ
+            let targetHeight = isCrouching ? CROUCH_HEIGHT : STAND_HEIGHT;
+            currentPlayerHeight = THREE.MathUtils.lerp(currentPlayerHeight, targetHeight, delta * 10);
+
+            if (cameraHolder.position.y <= currentGround + currentPlayerHeight) {
+                velocity.y = 0; 
+                cameraHolder.position.y = currentGround + currentPlayerHeight; 
+                canJump = true;
             }
 
             if(gunMesh) {
