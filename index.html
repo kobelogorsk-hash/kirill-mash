@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Full Fixed Version</title>
+    <title>Browser CS Prototype - Skin Update</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 5; }
@@ -90,15 +90,17 @@
         <div class="control-group">
             <label>Скин оружия</label>
             <select id="skin-select">
-                <option value="default">Стандарт</option>
-                <option value="gold">Золотой Век</option>
-                <option value="neon">Асимов Киберпанк</option>
+                <option value="default">Стандартный заводской</option>
+                <option value="gold">Золотой век (Solid Gold)</option>
+                <option value="asiimov">Асимов (Asiimov)</option>
+                <option value="fade">Градиент (Fade)</option>
+                <option value="vulcan">Вулкан (Vulcan)</option>
+                <option value="dlore">История о драконе (Dragon Lore)</option>
             </select>
         </div>
         
         <button class="start-btn" onclick="startGame()">В БОЙ</button>
         <button class="sec-btn" onclick="toggleSettings(true)">Настройки</button>
-        <p style="font-size: 11px; color: #aaa; margin-top: 10px;">Зажимай Left Ctrl, чтобы присесть. Ошибки геометрии и ног ботов устранены!</p>
     </div>
 
     <div class="panel" id="settings-menu" style="display: none;">
@@ -212,6 +214,50 @@
         const texture = new THREE.CanvasTexture(canvas);
         texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
         texture.repeat.set(2, 2);
+        return texture;
+    }
+
+    // Динамический генератор скинов через Canvas HTML5
+    function generateWeaponTexture(skinType, baseColorHex) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+
+        if (skinType === 'gold') {
+            ctx.fillStyle = '#FFD700'; ctx.fillRect(0, 0, 256, 256);
+            ctx.fillStyle = '#DAA520'; for(let i=0;i<20;i++) ctx.fillRect(Math.random()*256, Math.random()*256, 40, 2);
+        } 
+        else if (skinType === 'asiimov') {
+            ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, 256, 256);
+            ctx.fillStyle = '#1A1A1A'; ctx.fillRect(0, 80, 256, 60);
+            ctx.fillStyle = '#FF6600';
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(120, 0); ctx.lineTo(60, 80); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(256, 256); ctx.lineTo(140, 256); ctx.lineTo(200, 140); ctx.fill();
+        } 
+        else if (skinType === 'fade') {
+            let grad = ctx.createLinearGradient(0, 0, 256, 0);
+            grad.addColorStop(0, '#FF007F'); grad.addColorStop(0.5, '#9B30FF'); grad.addColorStop(1, '#FFCC00');
+            ctx.fillStyle = grad; ctx.fillRect(0, 0, 256, 256);
+        } 
+        else if (skinType === 'vulcan') {
+            ctx.fillStyle = '#1E222A'; ctx.fillRect(0, 0, 256, 256);
+            ctx.fillStyle = '#FFFFFF'; ctx.fillRect(20, 20, 216, 30); ctx.fillRect(80, 120, 100, 40);
+            ctx.fillStyle = '#00D2FF'; ctx.fillRect(20, 50, 40, 10); ctx.fillRect(200, 110, 36, 10);
+        } 
+        else if (skinType === 'dlore') {
+            ctx.fillStyle = '#A3761A'; ctx.fillRect(0, 0, 256, 256);
+            let grad = ctx.createLinearGradient(0, 256, 256, 0);
+            grad.addColorStop(0, '#FF3300'); grad.addColorStop(1, '#FFCC00');
+            ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(128, 128, 70, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#332200'; ctx.lineWidth = 4;
+            for(let i=0; i<5; i++) { ctx.beginPath(); ctx.arc(50+i*30, 200-i*10, 20, 0, Math.PI); ctx.stroke(); }
+        } 
+        else {
+            ctx.fillStyle = baseColorHex; ctx.fillRect(0, 0, 256, 256);
+            ctx.fillStyle = '#111111'; ctx.fillRect(0, 200, 256, 56);
+        }
+
+        const texture = new THREE.CanvasTexture(canvas);
         return texture;
     }
 
@@ -422,14 +468,15 @@
         for (let i = camera.children.length - 1; i >= 0; i--) camera.remove(camera.children[i]);
 
         gunMesh = new THREE.Group();
-        let color = WEAPON_CONFIGS[currentWeapon].color;
-        if(weaponSkin === 'gold') color = 0xFFD700;
-        if(weaponSkin === 'neon') color = 0xff00ff;
+        
+        let hexColor = "#" + WEAPON_CONFIGS[currentWeapon].color.toString(16);
+        const generatedTex = generateWeaponTexture(weaponSkin, hexColor);
+        const weaponMat = new THREE.MeshStandardMaterial({ map: generatedTex, roughness: 0.3, metalness: weaponSkin === 'gold' ? 0.6 : 0.1 });
 
         let wW = currentWeapon === 'p90' ? 0.12 : 0.07;
         let wL = currentWeapon === 'awp' ? 0.7 : 0.45;
 
-        const bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(wW, 0.11, wL), new THREE.MeshStandardMaterial({ color: color, roughness: 0.4 }));
+        const bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(wW, 0.11, wL), weaponMat);
         gunMesh.add(bodyMesh);
         
         const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.4), new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.7 }));
