@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Fixed Spawn</title>
+    <title>Browser CS Prototype - Physics Fix</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 5; }
@@ -69,9 +69,9 @@
         <div class="control-group">
             <label>Оружие</label>
             <select id="weapon-select">
-                <option value="ak47">AK-47 (Высокий урон, средняя скорость)</option>
-                <option value="awp">AWP Sniper (Ваншот, продольная прокрутка)</option>
-                <option value="p90">P90 SMG (Зажим, быстрый темп, слабый урон)</option>
+                <option value="ak47">AK-47 (Высокий урон)</option>
+                <option value="awp">AWP Sniper (Ваншот)</option>
+                <option value="p90">P90 SMG (Зажим и скорость)</option>
             </select>
         </div>
         
@@ -130,7 +130,6 @@
     let canJump = false;
     let prevTime = performance.now();
     const velocity = new THREE.Vector3();
-    const direction = new THREE.Vector3();
     
     let isGameActive = false;
     let playerHealth = 100;
@@ -144,7 +143,7 @@
     let bobTime = 0, recoilY = 0; 
     let botDifficulty = 'medium', mapType = 'dust2_style', weaponSkin = 'default', botCount = 6;
     let currentWeapon = 'ak47';
-    let groundY = 0; // Вынесено в глобальную видимость для стабильного спавна
+    let groundY = 0;
 
     const WEAPON_CONFIGS = {
         ak47: { name: 'AK-47', maxAmmo: 30, reserve: 90, damage: 35, fireRate: 140, recoil: 0.04, color: 0x4a2f13 },
@@ -155,7 +154,7 @@
     let lastFireTime = 0;
 
     const PLAYER_HEIGHT = 1.8;
-    const PLAYER_SPEED = 85.0;
+    const PLAYER_SPEED = 12.0; // Скорректировано под новую физику вектора
     const PLAYER_RADIUS = 0.6; 
 
     let uiAmmo, uiReserve, uiHP, reloadMsg, menuOverlay, mainMenu, settingsMenu, gameOverMenu, killFeed;
@@ -191,7 +190,7 @@
         playerHealth = 100;
         isReloading = false;
         recoilY = 0;
-        groundY = 0; // Сброс уровня земли
+        groundY = 0;
         bots = [];
         obstacles = [];
         platforms = [];
@@ -201,23 +200,21 @@
             scene.remove(scene.children[0]); 
         }
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         scene.add(ambientLight);
 
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
         dirLight.position.set(40, 100, 20);
         dirLight.castShadow = true;
-        dirLight.shadow.mapSize.width = 2048;
-        dirLight.shadow.mapSize.height = 2048;
         scene.add(dirLight);
 
         buildMap();
         spawnBots();
         createWeaponModel();
         
-        // Сразу принудительно задаем корректную высоту камеры над текстурами пола
+        // Гарантированный сброс позиции над землей при старте
         if(cameraHolder) {
-            cameraHolder.position.y = groundY + PLAYER_HEIGHT + 0.2; 
+            cameraHolder.position.set(5, PLAYER_HEIGHT + 0.2, 25);
         }
         velocity.set(0, 0, 0);
     }
@@ -238,7 +235,7 @@
         cameraHolder = new THREE.Group();
         cameraHolder.add(camera);
         
-        controls = new THREE.PointerLockControls(cameraHolder, document.body);
+        controls = new THREE.PointerLockControls(camera, document.body); // Привязка только к камере вращения
         
         controls.addEventListener('lock', () => {
             isGameActive = true;
@@ -250,7 +247,6 @@
                 isGameActive = false;
                 mainMenu.style.display = 'block';
                 settingsMenu.style.display = 'none';
-                gameOverMenu.style.display = 'none';
                 menuOverlay.style.display = 'flex';
             }
         });
@@ -263,7 +259,7 @@
                 case 'KeyA': moveLeft = true; break;
                 case 'KeyS': moveBackward = true; break;
                 case 'KeyD': moveRight = true; break;
-                case 'Space': if (canJump) { velocity.y += 42; canJump = false; } break;
+                case 'Space': if (canJump) { velocity.y += 12; canJump = false; } break;
                 case 'KeyR': reloadWeapon(); break;
             }
         };
@@ -291,73 +287,40 @@
         animate();
     }
 
-    function createGridTexture(color1, color2) {
-        const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 256;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = color1; ctx.fillRect(0, 0, 256, 256);
-        ctx.fillStyle = color2; ctx.lineWidth = 4; ctx.strokeRect(0, 0, 256, 256);
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(40, 40);
-        return texture;
-    }
-
     function buildMap() {
-        let floorColor1, floorColor2, fogColor, wallColor;
+        let floorColor1 = '#dfb887', floorColor2 = '#cda06c', fogColor = 0xDFB887, wallColor = 0xc29966;
         let blocks = []; 
 
         if (mapType === 'dust2_style') { 
-            floorColor1 = '#dfb887'; floorColor2 = '#cda06c'; fogColor = 0xDFB887; wallColor = 0xc29966;
-            
             // Платформа А-плента
             blocks.push({x: 25, y: 2, z: -20, w: 25, h: 4, d: 25, type: 'platform'}); 
-            
-            // Пандус (подъем) на Платформу А
+            // Пандус (подъем)
             blocks.push({x: 25, y: 1, z: -2, w: 6, h: 2, d: 11, type: 'ramp', rotX: 0.2});
-
-            // Стены Длины (Long) и коробки СТ-спавна
+            // Стены
             blocks.push({x: 0, y: 3, z: -35, w: 4, h: 6, d: 30, type: 'wall'}); 
             blocks.push({x: 38, y: 2.5, z: 10, w: 4, h: 5, d: 40, type: 'wall'});
             blocks.push({x: -25, y: 2.5, z: -10, w: 6, h: 5, d: 20, type: 'wall'});
-
-            // Защитные ящики на пленте А
+            // Ящики
             blocks.push({x: 20, y: 4.75, z: -25, w: 2.5, h: 1.5, d: 2.5, type: 'wall'}); 
-            blocks.push({x: 28, y: 4.75, z: -15, w: 2, h: 1.5, d: 2, type: 'wall'});
-            
-            // Обычные ящики на земле (укрытия)
             blocks.push({x: 12, y: 1.25, z: 10, w: 2.5, h: 2.5, d: 2.5, type: 'wall'});
-            blocks.push({x: -10, y: 1.5, z: -5, w: 3, h: 3, d: 3, type: 'wall'});
-
-            // Безопасный спавн игрока в воздухе (над землей)
-            if(cameraHolder) cameraHolder.position.set(5, PLAYER_HEIGHT + 0.5, 25);
-
         } else if (mapType === 'ice_style') { 
             floorColor1 = '#ddf0ff'; floorColor2 = '#b0d8f8'; fogColor = 0xDEEEFA; wallColor = 0x88ccff;
             blocks = [
                 {x: 12, y: 3.5, z: 12, w: 8, h: 7, d: 8, type: 'wall'},
-                {x: -12, y: 3.5, z: 12, w: 8, h: 7, d: 8, type: 'wall'},
-                {x: 12, y: 3.5, z: -12, w: 8, h: 7, d: 8, type: 'wall'},
-                {x: -12, y: 3.5, z: -12, w: 8, h: 7, d: 8, type: 'wall'},
-                {x: 0, y: 3, z: 35, w: 25, h: 6, d: 4, type: 'wall'},
-                {x: 0, y: 3, z: -35, w: 25, h: 6, d: 4, type: 'wall'}
+                {x: -12, y: 3.5, z: 12, w: 8, h: 7, d: 8, type: 'wall'}
             ];
-            if(cameraHolder) cameraHolder.position.set(0, PLAYER_HEIGHT + 0.5, 0);
         } else { 
             floorColor1 = '#222222'; floorColor2 = '#333333'; fogColor = 0x111111; wallColor = 0x555555;
             blocks = [
-                {x: -25, y: 9, z: -25, w: 22, h: 18, d: 22, type: 'wall'},
-                {x: 25, y: 12.5, z: -25, w: 22, h: 25, d: 22, type: 'wall'},
-                {x: -25, y: 7, z: 25, w: 22, h: 14, d: 22, type: 'wall'},
-                {x: 25, y: 10, z: 25, w: 22, h: 20, d: 22, type: 'wall'}
+                {x: -25, y: 7, z: 25, w: 22, h: 14, d: 22, type: 'wall'}
             ];
-            if(cameraHolder) cameraHolder.position.set(0, PLAYER_HEIGHT + 0.5, 0);
         }
 
         scene.background = new THREE.Color(fogColor);
         scene.fog = new THREE.FogExp2(fogColor, 0.015);
 
         const floorGeo = new THREE.PlaneGeometry(300, 300);
-        const floorMat = new THREE.MeshStandardMaterial({ map: createGridTexture(floorColor1, floorColor2), roughness: 0.8 });
+        const floorMat = new THREE.MeshStandardMaterial({ color: floorColor2, roughness: 0.9 });
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.rotation.x = -Math.PI / 2;
         floor.receiveShadow = true;
@@ -365,9 +328,7 @@
 
         const boxGeo = new THREE.BoxGeometry(1, 1, 1);
         blocks.forEach(b => {
-            let mat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
-            if (mapType === 'ice_style') mat.roughness = 0.1;
-
+            const mat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.7 });
             const mesh = new THREE.Mesh(boxGeo, mat);
             mesh.position.set(b.x, b.y, b.z);
             mesh.scale.set(b.w, b.h, b.d);
@@ -425,7 +386,7 @@
         muzzleFlash.position.set(0, 0.02, -(wL/2 + 0.4));
         gunMesh.add(muzzleFlash);
 
-        gunMesh.position.set(0.24, -0.24, -0.45);
+        gunMesh.position.set(0.24, -0.24, -0.55);
         camera.add(gunMesh);
     }
 
@@ -447,14 +408,12 @@
 
             if (mapType === 'dust2_style') {
                 if(i % 2 === 0) {
-                    botGroup.position.set(20 + Math.random()*8, 4.1, -15 - Math.random()*8); 
+                    botGroup.position.set(20 + Math.random()*4, 4.1, -15 - Math.random()*4); 
                 } else {
-                    botGroup.position.set(30, 0, 5 + Math.random()*15); 
+                    botGroup.position.set(15 + Math.random()*10, 0, 5 + Math.random()*5); 
                 }
             } else {
-                const angle = Math.random() * Math.PI * 2;
-                const radius = 20 + Math.random() * 30;
-                botGroup.position.set(Math.cos(angle)*radius, 0, Math.sin(angle)*radius);
+                botGroup.position.set((Math.random() - 0.5) * 30, 0, (Math.random() - 0.5) * 30);
             }
             
             botGroup.userData = { health: 100, lastShot: 0, leftLeg, rightLeg, animOffset: Math.random()*5 };
@@ -466,29 +425,18 @@
     function shoot() {
         const now = performance.now();
         const conf = WEAPON_CONFIGS[currentWeapon];
-
         if(now - lastFireTime < conf.fireRate) return; 
         lastFireTime = now;
 
-        if(currentAmmo <= 0) {
-            reloadMsg.innerText = "НАЖМИТЕ 'R' ДЛЯ ПЕРЕЗАРЯДКИ";
-            reloadMsg.style.display = 'block';
-            setTimeout(() => reloadMsg.style.display = 'none', 1000);
-            return;
-        }
-
+        if(currentAmmo <= 0) return;
         currentAmmo--;
         updateHUD();
 
-        if(gunMesh) { gunMesh.position.z += 0.07; gunMesh.rotation.x += conf.recoil * 1.5; }
         recoilY += conf.recoil;
-
         if(muzzleFlash) { muzzleFlash.material.opacity = 1; setTimeout(() => muzzleFlash.material.opacity = 0, 50); }
 
         const raycaster = new THREE.Raycaster();
-        const spreadX = (Math.random() - 0.5) * (conf.recoil * 0.8);
-        const spreadY = (Math.random() - 0.5) * (conf.recoil * 0.8);
-        raycaster.setFromCamera(new THREE.Vector2(spreadX, spreadY), camera);
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
 
         const intersects = raycaster.intersectObjects(scene.children, true);
         createBulletTrail(raycaster);
@@ -499,7 +447,6 @@
 
             if (bots.includes(hitObj)) {
                 hitObj.userData.health -= conf.damage;
-                hitObj.position.add(raycaster.ray.direction.clone().setY(0).normalize().multiplyScalar(0.3));
                 if(hitObj.userData.health <= 0) killBot(hitObj);
                 break;
             }
@@ -508,26 +455,24 @@
     }
 
     function createBulletTrail(raycaster) {
-        const material = new THREE.LineBasicMaterial({ color: 0xffdd44, transparent: true, opacity: 0.7 });
-        const points = [new THREE.Vector3(0.24, -0.22, -0.5).applyMatrix4(camera.matrixWorld), raycaster.ray.at(80, new THREE.Vector3())];
+        const material = new THREE.LineBasicMaterial({ color: 0xffdd44, transparent: true, opacity: 0.5 });
+        const points = [new THREE.Vector3(0.24, -0.22, -0.5).applyMatrix4(camera.matrixWorld), raycaster.ray.at(50, new THREE.Vector3())];
         const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material);
         scene.add(line);
-        setTimeout(() => scene.remove(line), 35);
+        setTimeout(() => scene.remove(line), 30);
     }
 
     function reloadWeapon() {
         if(isReloading || currentAmmo === maxAmmo || reserveAmmo <= 0) return;
         isReloading = true;
-        reloadMsg.innerText = "ПЕРЕЗАРЯДКА..."; reloadMsg.style.display = 'block';
-        if(gunMesh) { gunMesh.rotation.x = -0.7; gunMesh.position.y = -0.4; }
+        reloadMsg.style.display = 'block';
 
         setTimeout(() => {
             const take = Math.min(maxAmmo - currentAmmo, reserveAmmo);
             currentAmmo += take; reserveAmmo -= take;
             isReloading = false; reloadMsg.style.display = 'none';
-            if(gunMesh) { gunMesh.rotation.x = 0; gunMesh.position.set(0.24, -0.24, -0.45); }
             updateHUD();
-        }, currentWeapon === 'awp' ? 2200 : 1300);
+        }, 1200);
     }
 
     function killBot(bot) {
@@ -535,9 +480,9 @@
         bots = bots.filter(b => b !== bot);
         const feedItem = document.createElement('div');
         feedItem.className = 'feed-item';
-        feedItem.innerHTML = `Вы убрали Бота [${WEAPON_CONFIGS[currentWeapon].name}] 🎯`;
+        feedItem.innerHTML = `Минус Бот [${WEAPON_CONFIGS[currentWeapon].name}] 🎯`;
         killFeed.prepend(feedItem);
-        setTimeout(() => feedItem.remove(), 3000);
+        setTimeout(() => feedItem.remove(), 2500);
         if(bots.length === 0) endGame(true);
     }
 
@@ -548,11 +493,11 @@
 
         bots.forEach(bot => {
             const dist = bot.position.distanceTo(playerPos);
-            const speed = botDifficulty === 'easy' ? 10 : (botDifficulty === 'hard' ? 30 : 18);
+            const speed = botDifficulty === 'easy' ? 4 : (botDifficulty === 'hard' ? 9 : 6);
 
             bot.lookAt(playerPos.x, bot.position.y, playerPos.z);
 
-            if(dist > 6) {
+            if(dist > 5) {
                 const dir = new THREE.Vector3().subVectors(playerPos, bot.position).normalize();
                 dir.y = 0; 
                 bot.position.add(dir.multiplyScalar(speed * delta));
@@ -562,10 +507,9 @@
                 bot.userData.rightLeg.rotation.x = -wave * 0.6;
             }
 
-            if(dist < 12 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 800 : 1600)) {
-                playerHealth -= (botDifficulty === 'hard' ? 15 : 8);
+            if(dist < 15 && time - bot.userData.lastShot > (botDifficulty === 'hard' ? 900 : 1700)) {
+                playerHealth -= (botDifficulty === 'hard' ? 12 : 6);
                 updateHUD();
-                document.body.style.backgroundColor = '#300'; setTimeout(() => document.body.style.backgroundColor = '#000', 60);
                 if(playerHealth <= 0) endGame(false);
                 bot.userData.lastShot = time;
             }
@@ -576,17 +520,15 @@
         uiAmmo.innerText = currentAmmo;
         uiReserve.innerText = reserveAmmo;
         uiHP.innerText = playerHealth;
-        uiHP.style.color = playerHealth < 35 ? '#ff2222' : 'white';
     }
 
     function endGame(win) {
         isGameActive = false; controls.unlock();
         gameOverMenu.style.display = 'block';
-        mainMenu.style.display = 'none'; settingsMenu.style.display = 'none';
+        mainMenu.style.display = 'none';
         menuOverlay.style.display = 'flex';
         document.getElementById('end-title').innerText = win ? "ПОБЕДА!" : "ВАС УБИЛИ";
         document.getElementById('end-title').style.color = win ? "#00ff00" : "#ff0000";
-        document.getElementById('end-reason').innerText = win ? "Карта полностью зачищена." : "Попробуйте другое оружие!";
     }
 
     function onWindowResize() {
@@ -600,56 +542,51 @@
         const delta = (time - prevTime) / 1000;
 
         if (controls && controls.isLocked && isGameActive && cameraHolder) {
-            velocity.x -= velocity.x * 10.0 * delta;
-            velocity.z -= velocity.z * 10.0 * delta;
-            velocity.y -= 9.8 * 22.0 * delta; 
+            velocity.y -= 28.0 * delta; // Гравитация
 
-            direction.z = Number(moveForward) - Number(moveBackward);
-            direction.x = Number(moveRight) - Number(moveLeft);
-            direction.normalize();
+            // Создаем правильные векторы направления движения на основе направления взгляда камеры
+            const frontVector = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            const sideVector = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            
+            frontVector.y = 0; frontVector.normalize();
+            sideVector.y = 0; sideVector.normalize();
 
-            if (moveForward || moveBackward) velocity.z -= direction.z * PLAYER_SPEED * delta;
-            if (moveLeft || moveRight) velocity.x -= direction.x * PLAYER_SPEED * delta;
+            const moveVector = new THREE.Vector3();
+            if (moveForward) moveVector.add(frontVector);
+            if (moveBackward) moveVector.sub(frontVector);
+            if (moveRight) moveVector.add(sideVector);
+            if (moveLeft) moveVector.sub(sideVector);
+            moveVector.normalize().multiplyScalar(PLAYER_SPEED * delta);
 
+            // Проверка коллизий по осям
             const oldPos = cameraHolder.position.clone();
-
-            controls.moveRight(-velocity.x * delta);
+            
+            cameraHolder.position.x += moveVector.x;
             if (checkPlayerCollision(cameraHolder.position)) cameraHolder.position.x = oldPos.x;
 
-            controls.moveForward(-velocity.z * delta);
+            cameraHolder.position.z += moveVector.z;
             if (checkPlayerCollision(cameraHolder.position)) cameraHolder.position.z = oldPos.z;
-            
+
             cameraHolder.position.y += (velocity.y * delta);
 
-            // Считывание высоты под ногами
+            // Обработка высоты рельефа
             let currentGround = 0;
             const raycasterDown = new THREE.Raycaster(cameraHolder.position, new THREE.Vector3(0, -1, 0));
             const platformIntersects = raycasterDown.intersectObjects(platforms);
 
-            if (platformIntersects.length > 0 && platformIntersects[0].distance <= PLAYER_HEIGHT + 0.3) {
+            if (platformIntersects.length > 0 && platformIntersects[0].distance <= PLAYER_HEIGHT + 0.4) {
                 currentGround = cameraHolder.position.y - platformIntersects[0].distance + PLAYER_HEIGHT;
             }
 
-            // Корректная фиксация на поверхности
             if (cameraHolder.position.y <= currentGround + PLAYER_HEIGHT) {
                 velocity.y = 0;
                 cameraHolder.position.y = currentGround + PLAYER_HEIGHT;
                 canJump = true;
             }
 
+            // Стабилизация камеры оружия
             recoilY = THREE.MathUtils.lerp(recoilY, 0, 0.1);
-            camera.rotation.x = recoilY;
-
-            if(gunMesh) {
-                gunMesh.position.z = THREE.MathUtils.lerp(gunMesh.position.z, -0.45, 0.1);
-                gunMesh.rotation.x = THREE.MathUtils.lerp(gunMesh.rotation.x, 0, 0.1);
-                if ((moveForward || moveBackward || moveLeft || moveRight) && canJump) {
-                    bobTime += delta * 13;
-                    gunMesh.position.y = -0.24 + Math.sin(bobTime) * 0.012;
-                } else {
-                    gunMesh.position.y = THREE.MathUtils.lerp(gunMesh.position.y, -0.24, 0.1);
-                }
-            }
+            camera.rotation.x += recoilY;
 
             botLogic(delta);
         }
