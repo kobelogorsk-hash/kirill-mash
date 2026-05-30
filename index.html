@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Browser CS Prototype - Unique Maps</title>
+    <title>Browser CS Prototype - Custom Bot Count</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; z-index: 5; }
@@ -18,7 +18,7 @@
         #menu-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: auto; z-index: 10; }
         h1 { color: #ff9900; font-size: 48px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 0 10px rgba(255,153,0,0.3); }
         .panel { background: #1a1a1a; padding: 30px; border-radius: 10px; border: 1px solid #333; text-align: center; color: white; max-width: 500px; width: 100%; box-sizing: border-box; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-        .control-group { margin: 20px 0; text-align: left; }
+        .control-group { margin: 15px 0; text-align: left; }
         label { display: block; margin-bottom: 5px; font-weight: bold; color: #aaa; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; }
         select, button { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 5px; border: none; font-size: 16px; cursor: pointer; box-sizing: border-box; }
         select { background: #2b2b2b; color: white; border: 1px solid #444; }
@@ -68,6 +68,17 @@
                 <option value="camo">Лесной Камуфляж</option>
             </select>
         </div>
+
+        <div class="control-group">
+            <label>Количество ботов</label>
+            <select id="bot-count-select">
+                <option value="2">2 Бота (Дуэль)</option>
+                <option value="4">4 Бота (Разминка)</option>
+                <option value="6" selected>6 Ботов (Стандарт)</option>
+                <option value="10">10 Ботов (Мясорубка)</option>
+                <option value="15">15 Ботов (Хардкор)</option>
+            </select>
+        </div>
         
         <div class="control-group">
             <label>Сложность ботов</label>
@@ -107,7 +118,7 @@
     let maxAmmo = 30;
     let isReloading = false;
     let bots = [];
-    let obstacles = [];
+    let obstacles = []; 
     
     let gunMesh, muzzleFlash;
     let bobTime = 0;
@@ -115,9 +126,11 @@
     let botDifficulty = 'medium';
     let mapType = 'dust2_style';
     let weaponSkin = 'default';
+    let botCount = 6; // Переменная для хранения количества ботов
 
     const PLAYER_HEIGHT = 1.8;
     const PLAYER_SPEED = 80.0;
+    const PLAYER_RADIUS = 0.6; 
 
     let uiAmmo, uiReserve, uiHP, reloadMsg, menuOverlay, mainMenu, gameOverMenu, killFeed;
 
@@ -131,6 +144,7 @@
         mapType = document.getElementById('map-select').value;
         weaponSkin = document.getElementById('skin-select').value;
         botDifficulty = document.getElementById('difficulty-select').value;
+        botCount = parseInt(document.getElementById('bot-count-select').value) || 6; // Получаем выбранное количество ботов
 
         playerHealth = 100;
         currentAmmo = maxAmmo;
@@ -253,25 +267,17 @@
         return texture;
     }
 
-    // ПОЛНОСТЬЮ ОБНОВЛЕННАЯ ФУНКЦИЯ ПОСТРОЕНИЯ УНИКАЛЬНЫХ КАРТ
     function buildMap() {
         let floorColor1, floorColor2, fogColor, wallColor, obstacleLayout = [];
         
-        // Переключаем настройки цветов и геометрии под каждую карту
         if (mapType === 'dust2_style') { 
             floorColor1 = '#e6c288'; floorColor2 = '#c2a876'; fogColor = 0xE6C288; wallColor = 0xd9b477;
-            
-            // Архитектура макета Dust II: Длинные стены, зигзаги, оборонительные ящики
             obstacleLayout = [
-                // Центральные разделительные стены (Мид)
                 {x: 0, z: -20, w: 4, h: 6, d: 35},
                 {x: 0, z: 25, w: 4, h: 6, d: 20},
-                // Длинная стена справа (Лонг)
                 {x: 25, z: 0, w: 30, h: 5, d: 4},
-                // Зигзаг слева
                 {x: -25, z: -15, w: 6, h: 5, d: 15},
                 {x: -15, z: 15, w: 15, h: 5, d: 6},
-                // Маленькие ящики-укрытия на точках
                 {x: 15, z: 20, w: 3, h: 3, d: 3},
                 {x: 12, z: 23, w: 2.5, h: 2.5, d: 2.5},
                 {x: -20, z: -35, w: 4, h: 3, d: 4},
@@ -279,38 +285,26 @@
             ];
         } else if (mapType === 'ice_style') { 
             floorColor1 = '#ddf0ff'; floorColor2 = '#b0d8f8'; fogColor = 0xDEEEFA; wallColor = 0x88ccff;
-            
-            // Архитектура макета Ice Map: Сложный симметричный лабиринт из блоков
             obstacleLayout = [
-                // Центральный крест лабиринта
                 {x: 12, z: 12, w: 8, h: 7, d: 8},
                 {x: -12, z: 12, w: 8, h: 7, d: 8},
                 {x: 12, z: -12, w: 8, h: 7, d: 8},
                 {x: -12, z: -12, w: 8, h: 7, d: 8},
-                // Внутренние кольцевые тупики и проходы
                 {x: 0, z: 35, w: 25, h: 6, d: 4},
                 {x: 0, z: -35, w: 25, h: 6, d: 4},
                 {x: 35, z: 0, w: 4, h: 6, d: 25},
                 {x: -35, z: 0, w: 4, h: 6, d: 25},
-                // Мелкие ледяные осколки для маневров в центре
                 {x: 0, z: 0, w: 4, h: 4, d: 4},
                 {x: 24, z: 24, w: 3, h: 5, d: 3},
                 {x: -24, z: -24, w: 3, h: 5, d: 3}
             ];
-        } else { // City Block
+        } else { 
             floorColor1 = '#222222'; floorColor2 = '#333333'; fogColor = 0x111111; wallColor = 0x555555;
-            
-            // Архитектура макета City Block: Четыре крупных квартала-небоскреба и перекресток улиц
             obstacleLayout = [
-                // Северо-западный квартал
                 {x: -25, z: -25, w: 22, h: 18, d: 22},
-                // Северо-восточный квартал
                 {x: 25, z: -25, w: 22, h: 25, d: 22},
-                // Юго-западный квартал
                 {x: -25, z: 25, w: 22, h: 14, d: 22},
-                // Юго-восточный квартал
                 {x: 25, z: 25, w: 22, h: 20, d: 22},
-                // Машины / Заграждения посреди улиц (укрытия на перекрестке)
                 {x: 0, z: 8, w: 3, h: 2, d: 6},
                 {x: -10, z: 0, w: 6, h: 2, d: 3},
                 {x: 12, z: -5, w: 4, h: 2.5, d: 4}
@@ -320,7 +314,6 @@
         scene.background = new THREE.Color(fogColor);
         scene.fog = new THREE.FogExp2(fogColor, 0.015);
 
-        // Строим землю
         const floorGeo = new THREE.PlaneGeometry(300, 300);
         const floorMat = new THREE.MeshStandardMaterial({ 
             map: createGridTexture(floorColor1, floorColor2),
@@ -331,11 +324,9 @@
         floor.receiveShadow = true;
         scene.add(floor);
 
-        // Общая геометрия для генерации объектов карты
         const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 
         obstacleLayout.forEach(pos => {
-            // Для ледяной карты делаем материал чуть прозрачным и глянцевым, для города - матовым
             let specificMat;
             if (mapType === 'ice_style') {
                 specificMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.1, metalness: 0.1, transparent: true, opacity: 0.9 });
@@ -351,14 +342,25 @@
             mesh.castShadow = true;
             mesh.receiveShadow = true;
             scene.add(mesh);
-            
-            // Записываем физические границы для коллизий игрока
             obstacles.push(new THREE.Box3().setFromObject(mesh));
         });
         
-        // Всегда сбрасываем игрока в безопасный центр (на перекресток / открытое место)
         if(cameraHolder) cameraHolder.position.set(0, PLAYER_HEIGHT, 0);
         velocity.set(0,0,0);
+    }
+
+    function checkPlayerCollision(nextPosition) {
+        const playerBox = new THREE.Box3(
+            new THREE.Vector3(nextPosition.x - PLAYER_RADIUS, 0, nextPosition.z - PLAYER_RADIUS),
+            new THREE.Vector3(nextPosition.x + PLAYER_RADIUS, PLAYER_HEIGHT, nextPosition.z + PLAYER_RADIUS)
+        );
+
+        for (let i = 0; i < obstacles.length; i++) {
+            if (playerBox.intersectsBox(obstacles[i])) {
+                return true; 
+            }
+        }
+        return false;
     }
 
     function createWeaponModel() {
@@ -396,10 +398,9 @@
         camera.add(gunMesh);
     }
 
+    // ДИНАМИЧЕСКИЙ СПАВН С УЧЕТОМ НАСТРОЙКИ МЕНЮ
     function spawnBots() {
-        const count = 6;
-        
-        for(let i=0; i<count; i++) {
+        for(let i = 0; i < botCount; i++) {
             const botGroup = new THREE.Group();
 
             const clothesMat = new THREE.MeshStandardMaterial({ color: mapType === 'dust2_style' ? 0x994d00 : 0x2244aa, roughness: 0.7 });
@@ -444,7 +445,6 @@
             rightArm.position.x = 0.45;
             botGroup.add(rightArm);
             
-            // Спавним ботов на некотором расстоянии от центра (игрока)
             const angle = Math.random() * Math.PI * 2;
             const radius = 25 + Math.random() * 35;
             botGroup.position.set(Math.cos(angle)*radius, 0, Math.sin(angle)*radius);
@@ -678,8 +678,19 @@
             if (moveForward || moveBackward) velocity.z -= direction.z * PLAYER_SPEED * delta;
             if (moveLeft || moveRight) velocity.x -= direction.x * PLAYER_SPEED * delta;
 
+            const oldPos = cameraHolder.position.clone();
+
             controls.moveRight(-velocity.x * delta);
+            let nextPos = cameraHolder.position.clone();
+            if (checkPlayerCollision(nextPos)) {
+                cameraHolder.position.x = oldPos.x; 
+            }
+
             controls.moveForward(-velocity.z * delta);
+            nextPos = cameraHolder.position.clone();
+            if (checkPlayerCollision(nextPos)) {
+                cameraHolder.position.z = oldPos.z; 
+            }
             
             cameraHolder.position.y += (velocity.y * delta);
 
